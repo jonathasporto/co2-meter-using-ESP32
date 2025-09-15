@@ -5,7 +5,7 @@
 
 #include "esp_system.h"
 #include "esp_log.h"
-
+#include "dht.h"
 #include "co2_sensor_task.h"
 #include "sd_card.h"
 #include "http_server.h"
@@ -28,6 +28,7 @@ void wifi_init_softap(void) {
 
     // Cria a interface de rede Wi-Fi AP padrão
     esp_netif_t *netif = esp_netif_create_default_wifi_ap();
+    (void)netif;
 
     // Configura o Wi-Fi em modo AP
     wifi_config_t wifi_config = {
@@ -66,11 +67,36 @@ void app_main() {
     }
 
     // Inicializa o cartão SD
-    ESP_LOGI(TAG, "Initializing SD CARD...");
-    if (!init_sd_card()) {
-        ESP_LOGE(TAG, "Failed to initialize SD card");
-        return;
+    // ESP_LOGI(TAG, "Initializing SD CARD...");
+    // if (!init_sd_card()) {
+    //     ESP_LOGE(TAG, "Failed to initialize SD card");
+    //     return;
+    // }
+
+    // Inicializa o RTC (agora o DS1302)
+    ESP_LOGI(TAG, "Initializing RTC CLOCK...");
+    initialize_rtc();
+
+    // --- INÍCIO DO BLOCO DE TESTE DE SENSORES ---
+    ESP_LOGI(TAG, "--- SENSOR TEST ROUTINE START ---");
+    vTaskDelay(pdMS_TO_TICKS(1000)); // Pequena pausa
+
+    // 1. Teste do RTC
+    char date_str[11], time_str[9];
+    get_current_date_time(date_str, time_str);
+    ESP_LOGI(TAG, "[TEST] RTC Date/Time: %s %s", date_str, time_str);
+
+    // 2. Teste do DHT22
+    float temperature = 0.0, humidity = 0.0;
+    if (dht_read_float_data(DHT_TYPE_AM2301, 15, &humidity, &temperature) == ESP_OK) {
+        ESP_LOGI(TAG, "[TEST] DHT22 Read: Temp=%.1fC, Hum=%.1f%%", temperature, humidity);
+    } else {
+        ESP_LOGE(TAG, "[TEST] DHT22 Read: FAILED");
     }
+    ESP_LOGI(TAG, "--- SENSOR TEST ROUTINE END ---");
+    // --- FIM DO BLOCO DE TESTE ---
+
+
     // Inicializa o Wi-Fi em modo AP
     ESP_LOGI(TAG, "Initializing Wifi AP MODE...");
     wifi_init_softap();

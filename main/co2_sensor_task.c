@@ -5,10 +5,12 @@
 #include "esp_log.h"
 #include "sd_card.h"
 #include "rtc.h"
+#include "dht.h" // Inclui a biblioteca do DHT
 
 #define UART_PORT UART_NUM_1
 #define TX_PIN 17
 #define RX_PIN 16
+#define DHT_PIN 15 // Pino do DHT22
 #define UART_BUF_SIZE 1024
 
 static const char *TAG = "CO2_SENSOR_TASK";
@@ -29,6 +31,12 @@ static void co2_sensor_task(void *arg) {
     uint8_t read_cmd[9] = { 0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79 };
     uint8_t data[9];
 
+    // Tempo de aquecimento para o sensor de CO2
+    ESP_LOGI(TAG, "Waiting 3 minutes for MH-Z14A sensor to warm up...");
+    vTaskDelay(pdMS_TO_TICKS(180)); // 3 minutos = 180.000 ms
+    ESP_LOGI(TAG, "Sensor warm-up complete. Starting readings.");
+
+
     while (1) {
         // Envia o comando para ler a concentração de CO2
         uart_write_bytes(UART_PORT, (const char *)read_cmd, sizeof(read_cmd));
@@ -45,22 +53,27 @@ static void co2_sensor_task(void *arg) {
             checksum = 0xFF - checksum + 1;
 
             if (checksum == data[8]) {
-                // Calcula a concentração de CO2
                 int co2_concentration = (data[2] << 8) | data[3];
 
-                // Obtém data e hora atuais
-                char date_str[11]; // "YYYY-MM-DD"
-                char time_str[9];  // "HH:MM:SS"
+                // NOVA PARTE: Leitura do sensor DHT22
+                float temperature = 0.0, humidity = 0.0;
+                if (dht_read_float_data(DHT_TYPE_AM2301, DHT_PIN, &humidity, &temperature) != ESP_OK) {
+                     ESP_LOGE(TAG, "Could not read data from DHT22");
+                }
+
+                char date_str[11], time_str[9];
                 get_current_date_time(date_str, time_str);
 
-                ESP_LOGI(TAG, "Date: %s Time: %s CO2 Concentration: %d ppm", date_str, time_str, co2_concentration);
+                // LOG ATUALIZADO: Mostra todos os dados
+                ESP_LOGI(TAG, "Date: %s Time: %s | CO2: %d ppm | Temp: %.1fC | Hum: %.1f%%", 
+                         date_str, time_str, co2_concentration, temperature, humidity);
 
-                // Formata a linha CSV
-                char csv_line[64];
-                snprintf(csv_line, sizeof(csv_line), "%s;%s;%d\n", date_str, time_str, co2_concentration);
+                char csv_line[128];
+                snprintf(csv_line, sizeof(csv_line), "%s;%s;%d;%.1f;%.1f\n", 
+                         date_str, time_str, co2_concentration, temperature, humidity);
 
-                // Grava no arquivo CSV
-                write_data_to_csv(csv_line);
+                // TODO: Descomentar a linha abaixo quando os resistores do SD card forem conectados
+                // write_data_to_csv(csv_line);
 
             } else {
                 ESP_LOGE(TAG, "Checksum error");
