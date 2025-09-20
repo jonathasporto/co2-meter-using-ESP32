@@ -31,11 +31,6 @@ static void co2_sensor_task(void *arg) {
     uint8_t read_cmd[9] = { 0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79 };
     uint8_t data[9];
 
-    // Tempo de aquecimento para o sensor de CO2
-    ESP_LOGI(TAG, "Waiting 3 minutes for MH-Z14A sensor to warm up...");
-    vTaskDelay(pdMS_TO_TICKS(180)); // 3 minutos = 180.000 ms
-    ESP_LOGI(TAG, "Sensor warm-up complete. Starting readings.");
-
 
     while (1) {
         // Envia o comando para ler a concentração de CO2
@@ -72,8 +67,7 @@ static void co2_sensor_task(void *arg) {
                 snprintf(csv_line, sizeof(csv_line), "%s;%s;%d;%.1f;%.1f\n", 
                          date_str, time_str, co2_concentration, temperature, humidity);
 
-                // TODO: Descomentar a linha abaixo quando os resistores do SD card forem conectados
-                // write_data_to_csv(csv_line);
+                write_data_to_csv(csv_line);
 
             } else {
                 ESP_LOGE(TAG, "Checksum error");

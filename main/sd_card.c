@@ -88,7 +88,7 @@ static void open_new_csv_file(void) {
     }
 
     // Obtém a data e hora atuais para nomear o arquivo
-    char date_time_str[20]; // "YYYY-MM-DD_HH-MM-SS"
+    char date_time_str[20];
     get_current_date_time_filename(date_time_str);
 
     // Salva o tempo de início do arquivo
@@ -96,11 +96,7 @@ static void open_new_csv_file(void) {
 
     // Cria o caminho completo do arquivo
     char file_path[FILE_PATH_MAX];
-    int ret = snprintf(file_path, sizeof(file_path), MOUNT_POINT"/%s.csv", date_time_str);
-    if (ret < 0 || ret >= sizeof(file_path)) {
-        ESP_LOGE(TAG, "File path is too long");
-        return;
-    }
+    snprintf(file_path, sizeof(file_path), MOUNT_POINT"/%s.csv", date_time_str);
 
     // Abre o arquivo para escrita
     ESP_LOGI(TAG, "Opening file %s", file_path);
@@ -109,8 +105,8 @@ static void open_new_csv_file(void) {
         ESP_LOGE(TAG, "Failed to open file for writing: errno %d", errno);
     } else {
         ESP_LOGI(TAG, "Opened file: %s", file_path);
-        // Escreve o cabeçalho do CSV
-        fprintf(csv_file, "Date;Time;CO2 Concentration\n");
+        // Escreve o cabeçalho do CSV CORRIGIDO para incluir Temp. e Umid.
+        fprintf(csv_file, "Date;Time;CO2_PPM;Temperatura;Umidade\n");
         fflush(csv_file);
     }
 }
@@ -130,6 +126,7 @@ void write_data_to_csv(const char *data) {
     if (csv_file != NULL) {
         fprintf(csv_file, "%s", data);
         fflush(csv_file);
+        ESP_LOGI(TAG, "Data successfully written to SD card.");
     }
 }
 
@@ -138,4 +135,6 @@ void close_current_file(void) {
         fclose(csv_file);
         csv_file = NULL;
     }
+
+    
 }

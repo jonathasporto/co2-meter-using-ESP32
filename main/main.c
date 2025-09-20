@@ -13,6 +13,8 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
+#define BUTTON_PIN GPIO_NUM_34
+
 static const char *TAG = "CO2-METER-SDCARD";
 
 void wifi_init_softap(void) {
@@ -57,6 +59,34 @@ void wifi_init_softap(void) {
     ESP_LOGI(TAG, "WiFi initialized in AP mode. SSID: %s", wifi_config.ap.ssid);
 }
 
+static void button_task(void *arg) {
+    gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
+    bool wifi_active = false;
+    
+    while(1) {
+        if (gpio_get_level(BUTTON_PIN) == 1 && !wifi_active) { 
+            wifi_active = true;
+            ESP_LOGI(TAG, "Button pressed! Activating Wi-Fi and HTTP Server for 15 minutes...");
+            
+            // Inicializa a pilha TCP/IP e Wi-Fi em modo AP
+            wifi_init_softap(); 
+            // Inicia o servidor HTTP
+            start_http_server();
+
+            vTaskDelay(pdMS_TO_TICKS(900000)); // 15 minutos
+
+            ESP_LOGI(TAG, "15 minutes timeout. Deactivating Wi-Fi...");
+            esp_wifi_stop();
+            // A função para parar o servidor httpd não é trivial, 
+            // mas parar o Wi-Fi já torna o servidor inacessível.
+            wifi_active = false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(200)); // Verifica o botão a cada 200ms
+    }
+}
+
+
+
 void app_main() {
     // Inicializa NVS
     esp_err_t ret = nvs_flash_init();
@@ -66,15 +96,27 @@ void app_main() {
         nvs_flash_init();
     }
 
-    // Inicializa o cartão SD
-    // ESP_LOGI(TAG, "Initializing SD CARD...");
-    // if (!init_sd_card()) {
-    //     ESP_LOGE(TAG, "Failed to initialize SD card");
-    //     return;
-    // }
+    //Inicializa o cartão SD
+    ESP_LOGI(TAG, "Initializing SD CARD...");
+    if (!init_sd_card()) {
+        ESP_LOGE(TAG, "Failed to initialize SD card");
+        return;
+    }
 
     // Inicializa o RTC (agora o DS1302)
     ESP_LOGI(TAG, "Initializing RTC CLOCK...");
+    // --- BLOCO NOVO PARA SINCRONIZAR O RELÓGIO INTERNO ---
+    ESP_LOGI(TAG, "Synchronizing system time with RTC module...");
+    struct tm timeinfo = {0};
+    // Lê a hora diretamente do hardware DS1302
+    read_time_from_ds1302(&timeinfo); 
+    // Converte para o formato de segundos
+    time_t t = mktime(&timeinfo); 
+    // Cria a estrutura timeval
+    struct timeval now = { .tv_sec = t };
+    // Acerta o relógio interno do sistema
+    settimeofday(&now, NULL); 
+    // --- FIM DO BLOCO DE SINCRONIZAÇÃO ---
     initialize_rtc();
 
     // --- INÍCIO DO BLOCO DE TESTE DE SENSORES ---
@@ -88,7 +130,8 @@ void app_main() {
 
     // 2. Teste do DHT22
     float temperature = 0.0, humidity = 0.0;
-    if (dht_read_float_data(DHT_TYPE_AM2301, 15, &humidity, &temperature) == ESP_OK) {
+
+    if (dht_read_float_data(DHT_TYPE_AM2301, 15, &humidity, &temperature) == ESP_OK) { // Pino 15
         ESP_LOGI(TAG, "[TEST] DHT22 Read: Temp=%.1fC, Hum=%.1f%%", temperature, humidity);
     } else {
         ESP_LOGE(TAG, "[TEST] DHT22 Read: FAILED");
@@ -112,4 +155,9 @@ void app_main() {
     // Inicia a tarefa do sensor
     ESP_LOGI(TAG, "Initializing CO2 SENSOR TASK...");
     start_co2_sensor_task();
+
+    // Inicia a tarefa do botão
+    xTaskCreate(button_task, "button_task", 2048, NULL, 5, NULL);
+
+    ESP_LOGI(TAG, "System initialization complete.");
 }
