@@ -103,20 +103,8 @@ void app_main() {
         return;
     }
 
-    // Inicializa o RTC (agora o DS1302)
+    // Inicializa o RTC
     ESP_LOGI(TAG, "Initializing RTC CLOCK...");
-    // --- BLOCO NOVO PARA SINCRONIZAR O RELÓGIO INTERNO ---
-    ESP_LOGI(TAG, "Synchronizing system time with RTC module...");
-    struct tm timeinfo = {0};
-    // Lê a hora diretamente do hardware DS1302
-    read_time_from_ds1302(&timeinfo); 
-    // Converte para o formato de segundos
-    time_t t = mktime(&timeinfo); 
-    // Cria a estrutura timeval
-    struct timeval now = { .tv_sec = t };
-    // Acerta o relógio interno do sistema
-    settimeofday(&now, NULL); 
-    // --- FIM DO BLOCO DE SINCRONIZAÇÃO ---
     initialize_rtc();
 
     // --- INÍCIO DO BLOCO DE TESTE DE SENSORES ---
@@ -130,8 +118,8 @@ void app_main() {
 
     // 2. Teste do DHT22
     float temperature = 0.0, humidity = 0.0;
-
-    if (dht_read_float_data(DHT_TYPE_AM2301, 15, &humidity, &temperature) == ESP_OK) { // Pino 15
+    // CORRIGIDO: Constante correta para o DHT22
+    if (dht_read_float_data(DHT_TYPE_AM2301, 15, &humidity, &temperature) == ESP_OK) {
         ESP_LOGI(TAG, "[TEST] DHT22 Read: Temp=%.1fC, Hum=%.1f%%", temperature, humidity);
     } else {
         ESP_LOGE(TAG, "[TEST] DHT22 Read: FAILED");
@@ -139,25 +127,12 @@ void app_main() {
     ESP_LOGI(TAG, "--- SENSOR TEST ROUTINE END ---");
     // --- FIM DO BLOCO DE TESTE ---
 
-
-    // Inicializa o Wi-Fi em modo AP
-    ESP_LOGI(TAG, "Initializing Wifi AP MODE...");
-    wifi_init_softap();
-
-    // Inicializa o RTC
-    ESP_LOGI(TAG, "Initializing RTC CLOCK...");
-    initialize_rtc();
-
-    // Inicia o servidor HTTP
-    ESP_LOGI(TAG, "Initializing HTTP SERVER...");
-    start_http_server();
-
     // Inicia a tarefa do sensor
     ESP_LOGI(TAG, "Initializing CO2 SENSOR TASK...");
     start_co2_sensor_task();
 
     // Inicia a tarefa do botão
-    xTaskCreate(button_task, "button_task", 2048, NULL, 5, NULL);
+    xTaskCreate(button_task, "button_task", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "System initialization complete.");
+    ESP_LOGI(TAG, "System initialization complete. Data logging started. Press button to activate Wi-Fi.");
 }

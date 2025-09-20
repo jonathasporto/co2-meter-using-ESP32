@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include <string.h>
+#include <sys/time.h>
 
 static const char *TAG = "DS1302_RTC";
 
@@ -59,6 +60,36 @@ static uint8_t ds1302_read_reg(uint8_t reg) {
     return value;
 }
 
+void read_time_from_ds1302(struct tm *timeinfo) {
+    if (!timeinfo) return;
+
+    // Registradores base de escrita (pares). Para leitura usamos (reg | 1)
+    const uint8_t REG_SEC   = 0x80;
+    const uint8_t REG_MIN   = 0x82;
+    const uint8_t REG_HOUR  = 0x84;
+    const uint8_t REG_DATE  = 0x86;
+    const uint8_t REG_MONTH = 0x88;
+    const uint8_t REG_DAY   = 0x8A; // dia da semana (opcional)
+    const uint8_t REG_YEAR  = 0x8C;
+
+    uint8_t sec   = ds1302_read_reg(REG_SEC);
+    uint8_t min   = ds1302_read_reg(REG_MIN);
+    uint8_t hour  = ds1302_read_reg(REG_HOUR);
+    uint8_t date  = ds1302_read_reg(REG_DATE);
+    uint8_t month = ds1302_read_reg(REG_MONTH);
+    uint8_t year  = ds1302_read_reg(REG_YEAR);
+    (void)ds1302_read_reg(REG_DAY); // se quiser usar dia da semana
+
+    timeinfo->tm_sec  = bcd_to_dec(sec & 0x7F);
+    timeinfo->tm_min  = bcd_to_dec(min & 0x7F);
+    timeinfo->tm_hour = bcd_to_dec(hour & 0x3F);
+    timeinfo->tm_mday = bcd_to_dec(date & 0x3F);
+    timeinfo->tm_mon  = bcd_to_dec(month & 0x1F) - 1;
+    timeinfo->tm_year = bcd_to_dec(year) + 100; // base 2000
+    timeinfo->tm_isdst = -1;
+}
+
+
 // Função principal de inicialização (renomeada para manter compatibilidade)
 void initialize_rtc(void) {
     gpio_config_t io_conf = {
@@ -111,26 +142,32 @@ void initialize_rtc(void) {
     ds1302_write_reg(0x8E, 0x80); // Re-enable write protect
 
     ESP_LOGI(TAG, "DS1302 RTC time has been set with compensation.");
+
+    // --- BLOCO NOVO PARA SINCRONIZAR O RELÓGIO INTERNO ---
+    ESP_LOGI(TAG, "Synchronizing system time with RTC module...");
+    read_time_from_ds1302(&timeinfo); // Reutilizando a variável 'timeinfo'
+    time_t t = mktime(&timeinfo); 
+    struct timeval now = { .tv_sec = t };
+    settimeofday(&now, NULL); 
+    ESP_LOGI(TAG, "System time synchronized.");
 }
 
 void get_current_date_time(char *date_str, char *time_str) {
-    struct tm timeinfo = {0};
-    timeinfo.tm_sec = bcd_to_dec(ds1302_read_reg(0x81));
-    timeinfo.tm_min = bcd_to_dec(ds1302_read_reg(0x83));
-    timeinfo.tm_hour = bcd_to_dec(ds1302_read_reg(0x85));
-    timeinfo.tm_mday = bcd_to_dec(ds1302_read_reg(0x87));
-    timeinfo.tm_mon = bcd_to_dec(ds1302_read_reg(0x89)) - 1;
-    timeinfo.tm_year = bcd_to_dec(ds1302_read_reg(0x8D)) + 100;
+    time_t now;
+    struct tm timeinfo;
+    time(&now); // Lê a hora do relógio interno (agora sincronizado)
+    localtime_r(&now, &timeinfo);
 
     strftime(date_str, 11, "%Y-%m-%d", &timeinfo);
     strftime(time_str, 9, "%H:%M:%S", &timeinfo);
 }
 
 void get_current_date_time_filename(char *date_time_str) {
-    time_t now = 0;
-    struct tm timeinfo = { 0 };
-    time(&now);
+    time_t now;
+    struct tm timeinfo;
+    time(&now); // Lê a hora do relógio interno (agora sincronizado)
     localtime_r(&now, &timeinfo);
-
-    strftime(date_time_str, 20, "%Y-%m-%d_%H-%M-%S", &timeinfo); // YYYY-MM-DD_HH-MM-SS
+    
+    // Formato para nome de arquivo sem caracteres especiais como ":"
+    strftime(date_time_str, 20, "%Y-%m-%d_%Hh%Mm", &timeinfo);
 }
