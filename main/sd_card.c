@@ -17,7 +17,7 @@ static const char *TAG = "SD_CARD";
 #define SPI_DMA_CHAN    SDSPI_DEFAULT_DMA
 #define FILE_PATH_MAX   128
 #define PIN_NUM_MISO    GPIO_NUM_19
-#define PIN_NUM_MOSI    GPIO_NUM_23
+#define PIN_NUM_MOSI    GPIO_NUM_21
 #define PIN_NUM_CLK     GPIO_NUM_18
 #define PIN_NUM_CS      GPIO_NUM_5
 

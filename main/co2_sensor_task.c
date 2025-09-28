@@ -10,7 +10,7 @@
 #define UART_PORT UART_NUM_1
 #define TX_PIN 17
 #define RX_PIN 16
-#define DHT_PIN 15 // Pino do DHT22
+#define DHT_PIN 4 // Pino do DHT22
 #define UART_BUF_SIZE 1024
 
 static const char *TAG = "CO2_SENSOR_TASK";

@@ -52,9 +52,9 @@
     "task.h": "c",
     "co2_sensor_task.h": "c"
   },
-  "idf.espIdfPathWin": "C:\\Users\\jonat\\esp\\v5.5.1\\esp-idf",
-  "idf.toolsPathWin": "C:\\Users\\jonat\\.espressif",
-  "idf.pythonInstallPath": "C:\\Users\\jonat\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+  "idf.espIdfPathWin": "C:/Espressif/frameworks/esp-idf-v5.5.1/",
+  "idf.toolsPathWin": "C:\\Espressif",
+  "idf.pythonInstallPath": "C:\\Espressif\\tools\\idf-python\\3.11.2\\python.exe",
   "idf.portWin": "COM5",
   "idf.openOcdConfigs": [
     "board/esp32-wrover-kit-3.3v.cfg"

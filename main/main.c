@@ -1,8 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
 #include <string.h>
-
 #include "esp_system.h"
 #include "esp_log.h"
 #include "dht.h"
@@ -13,7 +11,8 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
-#define BUTTON_PIN GPIO_NUM_34
+#define BUTTON_PIN GPIO_NUM_14
+#define DHT_PIN 4 // Pino do DHT22
 
 static const char *TAG = "CO2-METER-SDCARD";
 
@@ -119,7 +118,7 @@ void app_main() {
     // 2. Teste do DHT22
     float temperature = 0.0, humidity = 0.0;
     // CORRIGIDO: Constante correta para o DHT22
-    if (dht_read_float_data(DHT_TYPE_AM2301, 15, &humidity, &temperature) == ESP_OK) {
+    if (dht_read_float_data(DHT_TYPE_AM2301, DHT_PIN, &humidity, &temperature) == ESP_OK) {
         ESP_LOGI(TAG, "[TEST] DHT22 Read: Temp=%.1fC, Hum=%.1f%%", temperature, humidity);
     } else {
         ESP_LOGE(TAG, "[TEST] DHT22 Read: FAILED");
