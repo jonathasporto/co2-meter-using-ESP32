@@ -63,29 +63,12 @@ static uint8_t ds1302_read_reg(uint8_t reg) {
 void read_time_from_ds1302(struct tm *timeinfo) {
     if (!timeinfo) return;
 
-    // Registradores base de escrita (pares). Para leitura usamos (reg | 1)
-    const uint8_t REG_SEC   = 0x80;
-    const uint8_t REG_MIN   = 0x82;
-    const uint8_t REG_HOUR  = 0x84;
-    const uint8_t REG_DATE  = 0x86;
-    const uint8_t REG_MONTH = 0x88;
-    const uint8_t REG_DAY   = 0x8A; // dia da semana (opcional)
-    const uint8_t REG_YEAR  = 0x8C;
-
-    uint8_t sec   = ds1302_read_reg(REG_SEC);
-    uint8_t min   = ds1302_read_reg(REG_MIN);
-    uint8_t hour  = ds1302_read_reg(REG_HOUR);
-    uint8_t date  = ds1302_read_reg(REG_DATE);
-    uint8_t month = ds1302_read_reg(REG_MONTH);
-    uint8_t year  = ds1302_read_reg(REG_YEAR);
-    (void)ds1302_read_reg(REG_DAY); // se quiser usar dia da semana
-
-    timeinfo->tm_sec  = bcd_to_dec(sec & 0x7F);
-    timeinfo->tm_min  = bcd_to_dec(min & 0x7F);
-    timeinfo->tm_hour = bcd_to_dec(hour & 0x3F);
-    timeinfo->tm_mday = bcd_to_dec(date & 0x3F);
-    timeinfo->tm_mon  = bcd_to_dec(month & 0x1F) - 1;
-    timeinfo->tm_year = bcd_to_dec(year) + 100; // base 2000
+    timeinfo->tm_sec  = bcd_to_dec(ds1302_read_reg(0x81) & 0x7F);
+    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F);
+    timeinfo->tm_hour = bcd_to_dec(ds1302_read_reg(0x85) & 0x3F);
+    timeinfo->tm_mday = bcd_to_dec(ds1302_read_reg(0x87) & 0x3F);
+    timeinfo->tm_mon  = bcd_to_dec(ds1302_read_reg(0x89) & 0x1F) - 1;
+    timeinfo->tm_year = bcd_to_dec(ds1302_read_reg(0x8D)) + 100;
     timeinfo->tm_isdst = -1;
 }
 
@@ -101,55 +84,42 @@ void initialize_rtc(void) {
     gpio_set_level(DS1302_RST_PIN, 0);
     ds1302_write_reg(DS1302_WRITE_PROTECT, 0x00);
 
-    ESP_LOGW(TAG, "Forcing RTC time set to compile time.");
-    const char *compile_date = __DATE__; // "Mmm dd yyyy"
-    const char *compile_time = __TIME__; // "hh:mm:ss"
-
-    struct tm timeinfo = {0};
-    sscanf(compile_time, "%d:%d:%d", &timeinfo.tm_hour, &timeinfo.tm_min, &timeinfo.tm_sec);
-    char month_str[4];
-    sscanf(compile_date, "%s %d %d", month_str, &timeinfo.tm_mday, &timeinfo.tm_year);
-    timeinfo.tm_year -= 1900;
-
-    const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    for (int i = 0; i < 12; i++) {
-        if (strcmp(month_str, months[i]) == 0) {
-            timeinfo.tm_mon = i;
-            break;
+    if (ds1302_read_reg(DS1302_SECONDS_REG) & 0x80) {
+        ESP_LOGW(TAG, "RTC clock halt detected. Setting to compile time.");
+        // Se estiver parado, acerta a hora com o tempo da compilação
+        const char *compile_date = __DATE__;
+        const char *compile_time = __TIME__;
+        struct tm timeinfo = {0};
+        sscanf(compile_time, "%d:%d:%d", &timeinfo.tm_hour, &timeinfo.tm_min, &timeinfo.tm_sec);
+        char month_str[4];
+        sscanf(compile_date, "%s %d %d", month_str, &timeinfo.tm_mday, &timeinfo.tm_year);
+        timeinfo.tm_year -= 1900;
+        const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+        for (int i = 0; i < 12; i++) {
+            if (strcmp(month_str, months[i]) == 0) { timeinfo.tm_mon = i; break; }
         }
+        
+        ds1302_write_reg(0x8E, 0x00); // Disable write protect
+        ds1302_write_reg(0x8C, dec_to_bcd(timeinfo.tm_year - 100));
+        ds1302_write_reg(0x8A, dec_to_bcd(timeinfo.tm_wday + 1));
+        ds1302_write_reg(0x88, dec_to_bcd(timeinfo.tm_mon + 1));
+        ds1302_write_reg(0x86, dec_to_bcd(timeinfo.tm_mday));
+        ds1302_write_reg(0x84, dec_to_bcd(timeinfo.tm_hour));
+        ds1302_write_reg(0x82, dec_to_bcd(timeinfo.tm_min));
+        ds1302_write_reg(0x80, dec_to_bcd(timeinfo.tm_sec & 0x7F)); // Habilita o clock
+        ds1302_write_reg(0x8E, 0x80); // Re-enable write protect
+        ESP_LOGI(TAG, "DS1302 RTC time has been set.");
     }
-    // --- INÍCIO DA CORREÇÃO DE ATRASO ---
-    // Converte a hora da compilação para segundos
-    time_t compile_time_seconds = mktime(&timeinfo);
 
-    // Adiciona 90 segundos para compensar o tempo de compilação e flash
-    compile_time_seconds += 90; 
-
-    // Converte os segundos de volta para a estrutura de tempo
-    struct tm adjusted_timeinfo;
-    localtime_r(&compile_time_seconds, &adjusted_timeinfo);
-    // --- FIM DA CORREÇÃO DE ATRASO ---
-    
-    // Agora, usa a hora AJUSTADA ('adjusted_timeinfo') para gravar no RTC
-    ds1302_write_reg(0x8E, 0x00); // Disable write protect
-    ds1302_write_reg(0x8C, dec_to_bcd(adjusted_timeinfo.tm_year - 100));
-    ds1302_write_reg(0x8A, dec_to_bcd(adjusted_timeinfo.tm_wday + 1));
-    ds1302_write_reg(0x88, dec_to_bcd(adjusted_timeinfo.tm_mon + 1));
-    ds1302_write_reg(0x86, dec_to_bcd(adjusted_timeinfo.tm_mday));
-    ds1302_write_reg(0x84, dec_to_bcd(adjusted_timeinfo.tm_hour));
-    ds1302_write_reg(0x82, dec_to_bcd(adjusted_timeinfo.tm_min));
-    ds1302_write_reg(0x80, dec_to_bcd(adjusted_timeinfo.tm_sec & 0x7F)); // Habilita o clock
-    ds1302_write_reg(0x8E, 0x80); // Re-enable write protect
-
-    ESP_LOGI(TAG, "DS1302 RTC time has been set with compensation.");
-
-    // --- BLOCO NOVO PARA SINCRONIZAR O RELÓGIO INTERNO ---
+    // SINCRONIZA O RELÓGIO INTERNO DO ESP32 com o hardware
     ESP_LOGI(TAG, "Synchronizing system time with RTC module...");
-    read_time_from_ds1302(&timeinfo); // Reutilizando a variável 'timeinfo'
-    time_t t = mktime(&timeinfo); 
+    struct tm timeinfo_from_rtc = {0};
+    read_time_from_ds1302(&timeinfo_from_rtc); 
+    time_t t = mktime(&timeinfo_from_rtc); 
     struct timeval now = { .tv_sec = t };
     settimeofday(&now, NULL); 
     ESP_LOGI(TAG, "System time synchronized.");
+
 }
 
 void get_current_date_time(char *date_str, char *time_str) {

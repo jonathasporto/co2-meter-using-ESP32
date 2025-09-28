@@ -6,6 +6,11 @@
 #include "sd_card.h"
 #include "rtc.h"
 #include "dht.h" // Inclui a biblioteca do DHT
+#include <stdlib.h> // Necessário para a função de ordenação qsort
+
+
+// #define NUM_AMOSTRAS 31      // Número de amostras a serem coletadas. Use um número ímpar.
+// #define INTERVALO_AMOSTRAS_MS 500 // Intervalo entre cada amostra rápida em milissegundos.
 
 #define UART_PORT UART_NUM_1
 #define TX_PIN 17
@@ -13,6 +18,11 @@
 #define DHT_PIN 4 
 #define FAN_PIN 13 
 #define UART_BUF_SIZE 1024
+
+// // Função auxiliar para ordenar o array de amostras
+// int comparar_inteiros(const void * a, const void * b) {
+//    return ( *(int*)a - *(int*)b );
+// }
 
 static const char *TAG = "CO2_SENSOR_TASK";
 
@@ -101,7 +111,7 @@ static void co2_sensor_task(void *arg) {
                         write_data_to_csv(csv_line);
 
                     }
-                
+                }
                 // 5. Ativa a trava para não repetir a medição no mesmo minuto
                 measurement_taken_for_this_slot = true;
             }
@@ -109,9 +119,8 @@ static void co2_sensor_task(void *arg) {
             // Se saiu do horário de medição, reseta a trava para o próximo
             measurement_taken_for_this_slot = false;
         }
-
+    
         vTaskDelay(pdMS_TO_TICKS(1000)); // Verifica a hora a cada segundo
-        }
     }
 }
 
