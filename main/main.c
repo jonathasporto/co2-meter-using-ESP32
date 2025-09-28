@@ -95,6 +95,9 @@ void app_main() {
         nvs_flash_init();
     }
 
+    // Pausa de 2 segundos para permitir que a energia da bateria estabilize
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    
     //Inicializa o cartão SD
     ESP_LOGI(TAG, "Initializing SD CARD...");
     if (!init_sd_card()) {
