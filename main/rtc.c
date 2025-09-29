@@ -63,13 +63,22 @@ static uint8_t ds1302_read_reg(uint8_t reg) {
 void read_time_from_ds1302(struct tm *timeinfo) {
     if (!timeinfo) return;
 
-    timeinfo->tm_sec  = bcd_to_dec(ds1302_read_reg(0x81) & 0x7F);
-    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F);
-    timeinfo->tm_hour = bcd_to_dec(ds1302_read_reg(0x85) & 0x3F);
-    timeinfo->tm_mday = bcd_to_dec(ds1302_read_reg(0x87) & 0x3F);
-    timeinfo->tm_mon  = bcd_to_dec(ds1302_read_reg(0x89) & 0x1F) - 1;
-    timeinfo->tm_year = bcd_to_dec(ds1302_read_reg(0x8D)) + 100;
-    timeinfo->tm_isdst = -1;
+    // Lê cada campo do registrador do DS1302
+    uint8_t sec   = ds1302_read_reg(0x81);
+    uint8_t min   = ds1302_read_reg(0x83);
+    uint8_t hour  = ds1302_read_reg(0x85);
+    uint8_t date  = ds1302_read_reg(0x87);
+    uint8_t month = ds1302_read_reg(0x89);
+    uint8_t year  = ds1302_read_reg(0x8D);
+
+    // Converte os valores de BCD (Binary-Coded Decimal) para decimal
+    timeinfo->tm_sec  = bcd_to_dec(sec & 0x7F);
+    timeinfo->tm_min  = bcd_to_dec(min & 0x7F);
+    timeinfo->tm_hour = bcd_to_dec(hour & 0x3F);
+    timeinfo->tm_mday = bcd_to_dec(date & 0x3F);
+    timeinfo->tm_mon  = bcd_to_dec(month & 0x1F) - 1; // Meses são 0-11
+    timeinfo->tm_year = bcd_to_dec(year) + 100;       // Anos desde 1900
+    timeinfo->tm_isdst = -1; // Informa que não há dados sobre horário de verão
 }
 
 
@@ -111,14 +120,20 @@ void initialize_rtc(void) {
         ESP_LOGI(TAG, "DS1302 RTC time has been set.");
     }
 
-    // SINCRONIZA O RELÓGIO INTERNO DO ESP32 com o hardware
+    // --- BLOCO NOVO PARA SINCRONIZAR O RELÓGIO INTERNO ---
     ESP_LOGI(TAG, "Synchronizing system time with RTC module...");
     struct tm timeinfo_from_rtc = {0};
-    read_time_from_ds1302(&timeinfo_from_rtc); 
-    time_t t = mktime(&timeinfo_from_rtc); 
-    struct timeval now = { .tv_sec = t };
-    settimeofday(&now, NULL); 
-    ESP_LOGI(TAG, "System time synchronized.");
+    read_time_from_ds1302(&timeinfo_from_rtc);
+
+    // Verificação de Sanidade: só sincroniza se o ano for plausível (entre 2024 e 2098)
+    if (timeinfo_from_rtc.tm_year > 123 && timeinfo_from_rtc.tm_year < 199) {
+        time_t t = mktime(&timeinfo_from_rtc);
+        struct timeval now = { .tv_sec = t };
+        settimeofday(&now, NULL);
+        ESP_LOGI(TAG, "System time synchronized with valid RTC time.");
+    } else {
+        ESP_LOGW(TAG, "RTC returned invalid time. System time not synchronized.");
+    }
 
 }
 
