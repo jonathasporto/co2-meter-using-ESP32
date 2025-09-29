@@ -63,6 +63,7 @@ static esp_err_t file_get_handler(httpd_req_t *req) {
                 return ESP_FAIL;
             }
         }
+        vTaskDelay(pdMS_TO_TICKS(100)); // Pequena pausa para não sufocar o sistema
     } while (chunksize > 0);
 
     fclose(file);
