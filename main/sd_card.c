@@ -32,14 +32,16 @@ bool init_sd_card(void) {
 
     // Configuração do host SPI
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    //host.slot = SPI2_HOST; // ou SPI3_HOST dependendo do seu hardware
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     // Configuração do barramento SPI
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = PIN_NUM_MOSI,
         .miso_io_num = PIN_NUM_MISO,
         .sclk_io_num = PIN_NUM_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
+        .quadwp_io_num = -1, // Não utilizado
+        .quadhd_io_num = -1, // Não utilizado
         .max_transfer_sz = 4000,
     };
 
@@ -81,10 +83,9 @@ bool init_sd_card(void) {
     return true;
 }
 
-static esp_err_t open_new_csv_file(void) {  // *** ALTERAR PARA esp_err_t ***
+static void open_new_csv_file(void) {
     if (csv_file != NULL) {
         fclose(csv_file);
-        csv_file = NULL;
     }
 
     // Obtém a data e hora atuais para nomear o arquivo
@@ -103,50 +104,31 @@ static esp_err_t open_new_csv_file(void) {  // *** ALTERAR PARA esp_err_t ***
     csv_file = fopen(file_path, "w");
     if (csv_file == NULL) {
         ESP_LOGE(TAG, "Failed to open file for writing: errno %d", errno);
-        return ESP_FAIL;  // *** RETORNAR ERRO ***
     } else {
         ESP_LOGI(TAG, "Opened file: %s", file_path);
-        // Escreve o cabeçalho do CSV
+        // Escreve o cabeçalho do CSV CORRIGIDO para incluir Temp. e Umid.
         fprintf(csv_file, "Date;Time;CO2_PPM;Temperatura;Umidade\n");
         fflush(csv_file);
-        return ESP_OK;  // *** RETORNAR SUCESSO ***
     }
 }
 
-esp_err_t write_data_to_csv(const char *data) {  // *** ALTERAR PARA esp_err_t ***
+void write_data_to_csv(const char *data) {
     if (csv_file == NULL) {
-        esp_err_t ret = open_new_csv_file();
-        if (ret != ESP_OK) {
-            return ret;  // *** RETORNAR ERRO SE FALHOU ***
-        }
+        open_new_csv_file();
     }
 
-    // Verifica se já passou 1 minuto para criar um novo arquivo (temporariamente)
+    // Verifica se já passou uma hora para criar um novo arquivo
     time_t current_time = time(NULL);
-    if (difftime(current_time, file_start_time) >= 60) {
-        esp_err_t ret = open_new_csv_file();
-        if (ret != ESP_OK) {
-            return ret;  // *** RETORNAR ERRO SE FALHOU ***
-        }
+//    if (difftime(current_time, file_start_time) >= 3600) {
+    if (difftime(current_time, file_start_time) >= 60) {  // alterado provisoriamente para 1 min
+        open_new_csv_file();
     }
 
     if (csv_file != NULL) {
-        int result = fprintf(csv_file, "%s", data);
-        if (result < 0) {
-            ESP_LOGE(TAG, "Failed to write data to file");
-            return ESP_FAIL;  // *** RETORNAR ERRO ***
-        }
-        
-        if (fflush(csv_file) != 0) {
-            ESP_LOGE(TAG, "Failed to flush data to file");
-            return ESP_FAIL;  // *** RETORNAR ERRO ***
-        }
-        
+        fprintf(csv_file, "%s", data);
+        fflush(csv_file);
         ESP_LOGI(TAG, "Data successfully written to SD card.");
-        return ESP_OK;  // *** RETORNAR SUCESSO ***
     }
-    
-    return ESP_FAIL;  // *** RETORNAR ERRO SE csv_file FOR NULL ***
 }
 
 void close_current_file(void) {
@@ -154,4 +136,6 @@ void close_current_file(void) {
         fclose(csv_file);
         csv_file = NULL;
     }
+
+    
 }
