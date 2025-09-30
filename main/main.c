@@ -3,6 +3,8 @@
 #include <string.h>
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
+#include "driver/gpio.h"
 #include "dht.h"
 #include "co2_sensor_task.h"
 #include "sd_card.h"
@@ -11,27 +13,82 @@
 #include "esp_wifi.h"
 #include "nvs_flash.h"
 
+// *** MODO DE TESTE - comente para modo normal ***
+#define MODO_DE_TESTE 
+
 #define BUTTON_PIN GPIO_NUM_14
-#define DHT_PIN 4 // Pino do DHT22
+#define DHT_PIN GPIO_NUM_4 
 
-static const char *TAG = "CO2-METER-SDCARD";
+static const char *TAG = "CO2-METER-MAIN";
 
-void wifi_init_softap(void) {
-    // Inicializa a pilha TCP/IP
+// *** FUNÇÃO PARA CALCULAR PRÓXIMO DESPERTAR ***
+static uint64_t calculate_next_wakeup_time(void) {
+    #ifdef MODO_DE_TESTE
+        // Modo teste: acordar a cada 60 segundos
+        return 60 * 1000000ULL; // 60 segundos em microssegundos
+    #else
+        // Modo normal: acordar a cada 30 minutos
+        return 30 * 60 * 1000000ULL; // 30 minutos em microssegundos
+    #endif
+}
+
+// *** FUNÇÃO PARA VERIFICAR SE DEVE FAZER MEDIÇÃO ***
+static bool should_perform_measurement(void) {
+    #ifdef MODO_DE_TESTE
+        // Modo teste: sempre fazer medição
+        return true;
+    #else
+        // Modo normal: verificar horários específicos
+        char date_str[11], time_str[9];
+        get_current_date_time(date_str, time_str);
+        
+        if (strcmp(date_str, "ERRO-DATA") == 0) {
+            return false; // RTC com problema
+        }
+        
+        struct tm timeinfo;
+        read_time_from_ds1302(&timeinfo);
+        
+        // Verificar se está nos horários: 07-09h, 11-13h, 16-18h
+        int hour = timeinfo.tm_hour;
+        bool in_time_window = (hour >= 7 && hour <= 9) ||
+                             (hour >= 11 && hour <= 13) ||
+                             (hour >= 16 && hour <= 18);
+        
+        // Verificar se é nos minutos 00 ou 30
+        bool is_interval = (timeinfo.tm_min == 0) || (timeinfo.tm_min == 30);
+        
+        return in_time_window && is_interval;
+    #endif
+}
+
+// *** FUNÇÃO PARA ENTRAR EM DEEP SLEEP ***
+static void goToDeepSleep(void) {
+    uint64_t wakeup_time = calculate_next_wakeup_time();
+    
+    ESP_LOGI(TAG, "Going to Deep Sleep for %llu seconds", wakeup_time / 1000000ULL);
+    
+    // Configurar despertar por timer
+    esp_sleep_enable_timer_wakeup(wakeup_time);
+    
+    // Configurar despertar por botão (GPIO externo)
+    esp_sleep_enable_ext0_wakeup(BUTTON_PIN, 1);
+    
+    // Entrar em Deep Sleep
+    esp_deep_sleep_start();
+}
+
+// *** FUNÇÃO PARA INICIALIZAR WI-FI AP ***
+static void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_netif_init());
-
-    // Cria o loop de eventos padrão
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    // Inicializa o Wi-Fi com as configurações padrão
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    // Cria a interface de rede Wi-Fi AP padrão
     esp_netif_t *netif = esp_netif_create_default_wifi_ap();
     (void)netif;
 
-    // Configura o Wi-Fi em modo AP
     wifi_config_t wifi_config = {
         .ap = {
             .ssid = "ESP32_CO2",
@@ -42,99 +99,78 @@ void wifi_init_softap(void) {
         },
     };
 
-    if (strlen("12345678") == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
-
-    // Define o modo Wi-Fi para Access Point
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-
-    // Define as configurações do Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-
-    // Inicia o Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "WiFi initialized in AP mode. SSID: %s", wifi_config.ap.ssid);
+    ESP_LOGI(TAG, "WiFi AP started. SSID: %s", wifi_config.ap.ssid);
 }
 
-static void button_task(void *arg) {
-    gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
-    bool wifi_active = false;
-    
-    while(1) {
-        if (gpio_get_level(BUTTON_PIN) == 1 && !wifi_active) { 
-            wifi_active = true;
-            ESP_LOGI(TAG, "Button pressed! Activating Wi-Fi and HTTP Server for 15 minutes...");
-            
-            // Inicializa a pilha TCP/IP e Wi-Fi em modo AP
-            wifi_init_softap(); 
-            // Inicia o servidor HTTP
-            start_http_server();
-
-            vTaskDelay(pdMS_TO_TICKS(900000)); // 15 minutos
-
-            ESP_LOGI(TAG, "15 minutes timeout. Deactivating Wi-Fi...");
-            esp_wifi_stop();
-            // A função para parar o servidor httpd não é trivial, 
-            // mas parar o Wi-Fi já torna o servidor inacessível.
-            wifi_active = false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200)); // Verifica o botão a cada 200ms
-    }
-}
-
-
-
+// *** FUNÇÃO PRINCIPAL DO SISTEMA ***
 void app_main() {
-    // Inicializa NVS
+    // Inicializar NVS
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-        ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
         nvs_flash_init();
     }
 
-    // Pausa de 2 segundos para permitir que a energia da bateria estabilize
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    // Verificar causa do despertar
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    
+    ESP_LOGI(TAG, "=== SYSTEM WAKE UP ===");
+    
+    switch (wakeup_reason) {
+        case ESP_SLEEP_WAKEUP_EXT0:
+            ESP_LOGI(TAG, "Wakeup caused by button press");
+            break;
+        case ESP_SLEEP_WAKEUP_TIMER:
+            ESP_LOGI(TAG, "Wakeup caused by timer");
+            break;
+        default:
+            ESP_LOGI(TAG, "Initial boot or other wakeup reason: %d", wakeup_reason);
+            break;
+    }
 
-    //Inicializa o cartão SD
-    ESP_LOGI(TAG, "Initializing SD CARD...");
+    // Inicializar componentes básicos
+    ESP_LOGI(TAG, "Initializing SD Card...");
     if (!init_sd_card()) {
-        ESP_LOGE(TAG, "Failed to initialize SD card");
+        ESP_LOGE(TAG, "SD Card initialization failed!");
+        goToDeepSleep(); // Tentar novamente depois
         return;
     }
 
-    // Inicializa o RTC
-    ESP_LOGI(TAG, "Initializing RTC CLOCK...");
+    ESP_LOGI(TAG, "Initializing RTC...");
     initialize_rtc();
 
-    // --- INÍCIO DO BLOCO DE TESTE DE SENSORES ---
-    ESP_LOGI(TAG, "--- SENSOR TEST ROUTINE START ---");
-    vTaskDelay(pdMS_TO_TICKS(1000)); // Pequena pausa
-
-    // 1. Teste do RTC
-    char date_str[11], time_str[9];
-    get_current_date_time(date_str, time_str);
-    ESP_LOGI(TAG, "[TEST] RTC Date/Time: %s %s", date_str, time_str);
-
-    // 2. Teste do DHT22
-    float temperature = 0.0, humidity = 0.0;
-    // CORRIGIDO: Constante correta para o DHT22
-    if (dht_read_float_data(DHT_TYPE_AM2301, DHT_PIN, &humidity, &temperature) == ESP_OK) {
-        ESP_LOGI(TAG, "[TEST] DHT22 Read: Temp=%.1fC, Hum=%.1f%%", temperature, humidity);
-    } else {
-        ESP_LOGE(TAG, "[TEST] DHT22 Read: FAILED");
+    // Verificar se foi despertar por botão (modo Wi-Fi)
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0) {
+        ESP_LOGI(TAG, "=== WIFI MODE ACTIVATED ===");
+        
+        wifi_init_softap();
+        start_http_server();
+        
+        ESP_LOGI(TAG, "WiFi server active for 15 minutes...");
+        vTaskDelay(pdMS_TO_TICKS(15 * 60 * 1000)); // 15 minutos
+        
+        ESP_LOGI(TAG, "WiFi timeout - returning to sleep mode");
+        esp_wifi_stop();
+        goToDeepSleep();
+        return;
     }
-    ESP_LOGI(TAG, "--- SENSOR TEST ROUTINE END ---");
-    // --- FIM DO BLOCO DE TESTE ---
-
-    // Inicia a tarefa do sensor
-    ESP_LOGI(TAG, "Initializing CO2 SENSOR TASK...");
-    start_co2_sensor_task();
-
-    // Inicia a tarefa do botão
-    xTaskCreate(button_task, "button_task", 4096, NULL, 5, NULL);
-
-    ESP_LOGI(TAG, "System initialization complete. Data logging started. Press button to activate Wi-Fi.");
+    
+    // Modo normal: verificar se deve fazer medição
+    if (should_perform_measurement()) {
+        ESP_LOGI(TAG, "=== PERFORMING SCHEDULED MEASUREMENT ===");
+        
+        // Chamar função de medição única (não task contínua)
+        perform_single_measurement();
+        
+        ESP_LOGI(TAG, "Measurement completed");
+    } else {
+        ESP_LOGI(TAG, "Outside measurement schedule - skipping");
+    }
+    
+    // Sempre voltar para Deep Sleep após processar
+    goToDeepSleep();
 }
