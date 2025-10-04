@@ -5,6 +5,6 @@
 void perform_single_measurement(void);
 
 // Função de compatibilidade (deprecated)
-void start_co2_sensor_task(void);
+// void start_co2_sensor_task(void);
 
 #endif // CO2_SENSOR_TASK_H
