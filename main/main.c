@@ -153,7 +153,7 @@ void app_main(void) {
     else {
         nvs_flash_init();
         initialize_rtc();
-
+        xTaskCreate(button_task, "button_task", 2048, NULL, 5, NULL);      
         bool should_measure;
         #ifdef MODO_DE_TESTE
             // --- CORREÇÃO 1: FORÇA A MEDIÇÃO NO MODO DE TESTE ---

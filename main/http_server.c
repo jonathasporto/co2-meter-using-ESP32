@@ -169,7 +169,7 @@ static esp_err_t file_list_handler(httpd_req_t *req) {
     // Obter a data e hora atuais usando o RTC
     char date_str[11]; // Formato YYYY-MM-DD
     char time_str[9];  // Formato HH:MM:SS
-    get_current_date_time(date_str, time_str);
+    get_current_date_time(date_str, sizeof(date_str), time_str, sizeof(time_str));
 
     // Formatar a data e hora em uma única string
     char datetime_str[32];

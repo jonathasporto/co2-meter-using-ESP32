@@ -89,7 +89,7 @@ static void open_new_csv_file(void) {
 
     // Obtém a data e hora atuais para nomear o arquivo
     char date_time_str[20];
-    get_current_date_time_filename(date_time_str);
+    get_current_date_time_filename(date_time_str, sizeof(date_time_str));
 
     // Salva o tempo de início do arquivo
     file_start_time = time(NULL);

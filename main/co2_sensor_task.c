@@ -97,7 +97,7 @@ void perform_single_measurement(void) {
     
     // 6. Processa e salva o valor final (a mediana)
     char date_str[11], time_str[9];
-    get_current_date_time(date_str, time_str);
+    get_current_date_time(date_str, sizeof(date_str), time_str, sizeof(time_str));
 
     ESP_LOGI(TAG, "FINAL VALUE: %s %s | CO2 (Median): %d ppm | Temp: %.1fC | Hum: %.1f%%", 
                 date_str, time_str, co2_mediana, temperature, humidity);
