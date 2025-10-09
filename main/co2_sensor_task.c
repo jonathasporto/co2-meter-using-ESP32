@@ -10,9 +10,13 @@
 #include <stdlib.h>
 #include "esp_sleep.h"
 
-#define FAN_PURGE_DURATION_S 9       // Duração que o fan fica ligado para limpeza, em segundos.
-#define NUM_AMOSTRAS 31              // Número de amostras a serem coletadas para a mediana. Use um número ímpar.
-#define INTERVALO_AMOSTRAS_MS 1000   // Intervalo entre cada amostra rápida em milissegundos.
+#define FAN_PURGE_DURATION_S 20        // Duração que o fan fica ligado para limpeza, em segundos. 
+#define NUM_AMOSTRAS 31                // Número de amostras a serem coletadas para a mediana. Use um número ímpar. (alterar para 61 pelo menos na prática)
+#define INTERVALO_AMOSTRAS_MS 2000     // Intervalo entre cada amostra rápida em milissegundos.
+
+// NOVO: Pino para controle de energia do sensor MH-Z14A
+#define CO2_POWER_PIN GPIO_NUM_23      // Pino conectado à base do transistor 2N2222A
+#define CO2_WARMUP_TIME_S 180           // Tempo de aquecimento do sensor em segundos (alterar para pelo menos 3 minutos na prática)
 
 #define UART_PORT UART_NUM_1
 #define TX_PIN 17
@@ -28,9 +32,38 @@ int comparar_inteiros(const void * a, const void * b) {
    return ( *(int*)a - *(int*)b );
 }
 
+// NOVA FUNÇÃO: Controla a energia do sensor MH-Z14A
+void co2_sensor_power_control(bool enable) {
+    static bool power_pin_initialized = false;
+    
+    // Inicializar o pino apenas uma vez
+    if (!power_pin_initialized) {
+        gpio_reset_pin(CO2_POWER_PIN);
+        gpio_set_direction(CO2_POWER_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(CO2_POWER_PIN, 0); // Começa desligado
+        power_pin_initialized = true;
+        ESP_LOGI(TAG, "CO2 sensor power control pin (GPIO%d) initialized", CO2_POWER_PIN);
+    }
+    
+    if (enable) {
+        ESP_LOGI(TAG, "Turning ON CO2 sensor power...");
+        gpio_set_level(CO2_POWER_PIN, 1); // Liga o transistor (sensor recebe energia)
+        ESP_LOGI(TAG, "CO2 sensor warming up for %d seconds...", CO2_WARMUP_TIME_S);
+        vTaskDelay(pdMS_TO_TICKS(CO2_WARMUP_TIME_S * 1000)); // Aguarda aquecimento
+        ESP_LOGI(TAG, "CO2 sensor ready for measurements");
+    } else {
+        ESP_LOGI(TAG, "Turning OFF CO2 sensor power...");
+        gpio_set_level(CO2_POWER_PIN, 0); // Desliga o transistor (sensor sem energia)
+    }
+}
 
 void perform_single_measurement(void) {
-    // --- Configuração dos Pinos e Periféricos ---
+    ESP_LOGI(TAG, "Performing scheduled measurement...");
+    
+    // NOVO: 1. Liga o sensor de CO2 PRIMEIRO (antes de tudo)
+    co2_sensor_power_control(true);
+    
+    // 2. Configuração dos Pinos e Periféricos (enquanto o sensor aquece)
     uart_config_t uart_config = {
         .baud_rate = 9600,
         .data_bits = UART_DATA_8_BITS,
@@ -45,25 +78,24 @@ void perform_single_measurement(void) {
     gpio_reset_pin(FAN_PIN);
     gpio_set_direction(FAN_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(FAN_PIN, 0); // Garante que comece desligado
-
-    ESP_LOGI(TAG, "Performing scheduled measurement...");
     
-    // 1. Liga o Fan para renovar o ar
+    // 3. Liga o Fan para renovar o ar (sensor já está aquecendo)
     ESP_LOGI(TAG, "Activating fan for %d seconds to purge air...", FAN_PURGE_DURATION_S);
     gpio_set_level(FAN_PIN, 1);
     vTaskDelay(pdMS_TO_TICKS(FAN_PURGE_DURATION_S * 1000));
 
-    // 2. Desliga o fan ANTES de iniciar as medições
+    // 4. Desliga o fan ANTES de iniciar as medições
     gpio_set_level(FAN_PIN, 0);
     ESP_LOGI(TAG, "Fan deactivated. Starting measurements in static air.");
     vTaskDelay(pdMS_TO_TICKS(1000)); // Pequena pausa para o ar assentar
 
-    // 3. Leitura do DHT (já com o ar renovado e parado)
+    // 5. Leitura do DHT (já com o ar renovado e parado)
     float temperature = 0.0, humidity = 0.0;
     if (dht_read_float_data(DHT_TYPE_AM2301, DHT_PIN, &humidity, &temperature) != ESP_OK) {
         ESP_LOGE(TAG, "Could not read data from DHT22");
     }
-    // 4. --- INÍCIO DA COLETA RÁPIDA DE AMOSTRAS ---
+    
+    // 6. --- INÍCIO DA COLETA RÁPIDA DE AMOSTRAS ---
     ESP_LOGI(TAG, "Collecting %d CO2 samples...", NUM_AMOSTRAS);
     int co2_amostras[NUM_AMOSTRAS];
     int amostras_validas = 0;
@@ -85,7 +117,10 @@ void perform_single_measurement(void) {
     ESP_LOGI(TAG, "Sample collection finished. Valid samples: %d/%d", amostras_validas, NUM_AMOSTRAS);
     // --- FIM DA COLETA RÁPIDA DE AMOSTRAS ---
 
-    // 5. --- CÁLCULO DA MEDIANA ---
+    // NOVO: 7. Desliga o sensor de CO2 IMEDIATAMENTE após as medições
+    co2_sensor_power_control(false);
+
+    // 8. --- CÁLCULO DA MEDIANA ---
     int co2_mediana = -1;
     if (amostras_validas > 0) {
         // Ordena o array de amostras do menor para o maior
@@ -95,7 +130,7 @@ void perform_single_measurement(void) {
     }
     // --- FIM DO CÁLCULO DA MEDIANA ---
     
-    // 6. Processa e salva o valor final (a mediana)
+    // 9. Processa e salva o valor final (a mediana)
     char date_str[11], time_str[9];
     get_current_date_time(date_str, sizeof(date_str), time_str, sizeof(time_str));
 
@@ -111,4 +146,5 @@ void perform_single_measurement(void) {
     // Desinstala o driver da UART para economizar energia
     uart_driver_delete(UART_PORT);
     
+    ESP_LOGI(TAG, "Measurement completed. Sensor powered down for energy saving.");
 }

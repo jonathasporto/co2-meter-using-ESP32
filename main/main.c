@@ -15,7 +15,7 @@
 #define BUTTON_PIN GPIO_NUM_14
 #define DHT_PIN 4 // Pino do DHT22
 
-// #define MODO_DE_TESTE // Comente esta linha para voltar ao modo normal (horários reais)
+//#define MODO_DE_TESTE // Comente esta linha para voltar ao modo normal (horários reais)
 
 static const char *TAG = "CO2-METER-SDCARD";
 

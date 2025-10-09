@@ -1,10 +1,10 @@
 #ifndef CO2_SENSOR_TASK_H
 #define CO2_SENSOR_TASK_H
 
-// Função principal para medição única
-void perform_single_measurement(void);
+#include <stdbool.h>
 
-// Função de compatibilidade (deprecated)
-// void start_co2_sensor_task(void);
+
+void co2_sensor_power_control(bool enable);
+void perform_single_measurement(void);
 
 #endif // CO2_SENSOR_TASK_H

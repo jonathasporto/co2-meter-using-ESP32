@@ -3,6 +3,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include <string.h>
 #include <sys/time.h>
 
@@ -19,10 +22,9 @@ static const char *TAG = "DS1302_RTC";
 
 #define DS1302_DELAY_US 10
 
-// CORREÇÃO: Offset em segundos para compensar a diferença observada
-// Baseado na observação: RTC está ~5 minutos atrasado
-// Ajuste este valor conforme necessário
-#define RTC_OFFSET_SECONDS 300  // 5 minutos = 300 segundos
+// Chave NVS para verificar se já foi inicializado
+#define NVS_NAMESPACE "rtc_config"
+#define NVS_KEY_INITIALIZED "rtc_init"
 
 static uint8_t bcd_to_dec(uint8_t val) { return (val / 16 * 10) + (val % 16); }
 static uint8_t dec_to_bcd(uint8_t val) { return (val / 10 * 16) + (val % 10); }
@@ -92,49 +94,92 @@ bool read_time_from_ds1302(struct tm *timeinfo) {
     return true;
 }
 
-// Função para ler a hora do RTC com correção de offset
-bool read_time_from_ds1302_corrected(struct tm *timeinfo) {
-    if (!read_time_from_ds1302(timeinfo)) {
-        return false;
-    }
-    
-    // Aplicar correção de offset
-    time_t rtc_time = mktime(timeinfo);
-    rtc_time += RTC_OFFSET_SECONDS;  // Adicionar o offset de correção
-    localtime_r(&rtc_time, timeinfo);
-    
-    ESP_LOGI(TAG, "Hora do RTC corrigida: %04d-%02d-%02d %02d:%02d:%02d", 
+void set_time_on_ds1302(const struct tm *timeinfo) {
+    ESP_LOGI(TAG, "Gravando no RTC: %04d-%02d-%02d %02d:%02d:%02d",
              timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
              timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-    
-    return true;
-}
-
-void set_time_on_ds1302(const struct tm *timeinfo) {
-    // Aplicar offset reverso antes de gravar no RTC
-    time_t adjusted_time = mktime((struct tm*)timeinfo);
-    adjusted_time -= RTC_OFFSET_SECONDS;  // Subtrair o offset antes de gravar
-    
-    struct tm rtc_time;
-    localtime_r(&adjusted_time, &rtc_time);
-    
-    ESP_LOGI(TAG, "Gravando no RTC (com offset): %04d-%02d-%02d %02d:%02d:%02d",
-             rtc_time.tm_year + 1900, rtc_time.tm_mon + 1, rtc_time.tm_mday,
-             rtc_time.tm_hour, rtc_time.tm_min, rtc_time.tm_sec);
     
     ds1302_write_reg(DS1302_WRITE_PROTECT, 0x00);
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    ds1302_write_reg(0x8C, dec_to_bcd(rtc_time.tm_year - 100));
-    ds1302_write_reg(0x8A, dec_to_bcd(rtc_time.tm_wday + 1));
-    ds1302_write_reg(0x88, dec_to_bcd(rtc_time.tm_mon + 1));
-    ds1302_write_reg(0x86, dec_to_bcd(rtc_time.tm_mday));
-    ds1302_write_reg(0x84, dec_to_bcd(rtc_time.tm_hour));
-    ds1302_write_reg(0x82, dec_to_bcd(rtc_time.tm_min));
-    ds1302_write_reg(0x80, dec_to_bcd(rtc_time.tm_sec) & 0x7F);
+    ds1302_write_reg(0x8C, dec_to_bcd(timeinfo->tm_year - 100));
+    ds1302_write_reg(0x8A, dec_to_bcd(timeinfo->tm_wday + 1));
+    ds1302_write_reg(0x88, dec_to_bcd(timeinfo->tm_mon + 1));
+    ds1302_write_reg(0x86, dec_to_bcd(timeinfo->tm_mday));
+    ds1302_write_reg(0x84, dec_to_bcd(timeinfo->tm_hour));
+    ds1302_write_reg(0x82, dec_to_bcd(timeinfo->tm_min));
+    ds1302_write_reg(0x80, dec_to_bcd(timeinfo->tm_sec) & 0x7F);
 
     ds1302_write_reg(DS1302_WRITE_PROTECT, 0x80);
-    ESP_LOGI(TAG, "RTC time set successfully with offset correction.");
+    ESP_LOGI(TAG, "RTC time set successfully.");
+}
+
+// Função para verificar se é a primeira inicialização
+bool is_first_boot(void) {
+    // Verificar se acordou do deep sleep
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    if (wakeup_reason != ESP_SLEEP_WAKEUP_UNDEFINED) {
+        ESP_LOGI(TAG, "Acordou do deep sleep - não é primeira inicialização");
+        return false;
+    }
+    
+    // Verificar flag no NVS
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Erro ao abrir NVS: %s", esp_err_to_name(err));
+        return true; // Assumir primeira inicialização se não conseguir acessar NVS
+    }
+    
+    uint8_t initialized = 0;
+    size_t required_size = sizeof(initialized);
+    err = nvs_get_blob(nvs_handle, NVS_KEY_INITIALIZED, &initialized, &required_size);
+    
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        // Primeira vez - marcar como inicializado
+        initialized = 1;
+        nvs_set_blob(nvs_handle, NVS_KEY_INITIALIZED, &initialized, sizeof(initialized));
+        nvs_commit(nvs_handle);
+        nvs_close(nvs_handle);
+        ESP_LOGI(TAG, "Primeira inicialização detectada");
+        return true;
+    }
+    
+    nvs_close(nvs_handle);
+    ESP_LOGI(TAG, "Não é primeira inicialização");
+    return false;
+}
+
+// Função para definir hora baseada na compilação
+void set_compile_time_to_rtc(void) {
+    const char *compile_date = __DATE__; // "Mmm dd yyyy"
+    const char *compile_time = __TIME__; // "hh:mm:ss"
+    struct tm timeinfo = {0};
+
+    // Parse da hora de compilação
+    sscanf(compile_time, "%d:%d:%d", &timeinfo.tm_hour, &timeinfo.tm_min, &timeinfo.tm_sec);
+    
+    char month_str[4];
+    sscanf(compile_date, "%s %d %d", month_str, &timeinfo.tm_mday, &timeinfo.tm_year);
+    timeinfo.tm_year -= 1900;
+
+    const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    for (int i = 0; i < 12; i++) {
+        if (strcmp(month_str, months[i]) == 0) {
+            timeinfo.tm_mon = i;
+            break;
+        }
+    }
+
+    // Calcular o dia da semana
+    time_t temp_time = mktime(&timeinfo);
+    localtime_r(&temp_time, &timeinfo);
+    
+    ESP_LOGI(TAG, "Definindo hora de compilação: %04d-%02d-%02d %02d:%02d:%02d",
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    
+    set_time_on_ds1302(&timeinfo);
 }
 
 void set_manual_time_rtc(int year, int month, int day, int hour, int minute, int second) {
@@ -156,6 +201,14 @@ void set_manual_time_rtc(int year, int month, int day, int hour, int minute, int
 }
 
 void initialize_rtc(void) {
+    // Inicializar NVS se necessário
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+    
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << DS1302_CLK_PIN) | (1ULL << DS1302_RST_PIN),
         .mode = GPIO_MODE_OUTPUT,
@@ -166,21 +219,40 @@ void initialize_rtc(void) {
     
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    if (ds1302_read_reg(0x81) & 0x80) {
-        ESP_LOGW(TAG, "RTC clock halt detected. Setting current time.");
-        // Definir uma hora atual (ajuste conforme necessário)
-        // set_manual_time_rtc(2025, 10, 5, 5, 36, 0);
+    // Verificar se o RTC está parado (Clock Halt)
+    bool rtc_halted = (ds1302_read_reg(0x81) & 0x80) != 0;
+    
+    // Verificar se é primeira inicialização
+    bool first_boot = is_first_boot();
+    
+    if (rtc_halted || first_boot) {
+        if (rtc_halted) {
+            ESP_LOGW(TAG, "RTC clock halt detected.");
+        }
+        if (first_boot) {
+            ESP_LOGI(TAG, "Primeira inicialização - usando hora de compilação.");
+        }
+        
+        // Usar hora de compilação
+        set_compile_time_to_rtc();
+    } else {
+        ESP_LOGI(TAG, "RTC já inicializado - mantendo hora atual.");
     }
 
-    ESP_LOGI(TAG, "Synchronizing system time with RTC (with offset correction)...");
+    // Sincronizar sistema com RTC
+    ESP_LOGI(TAG, "Synchronizing system time with RTC...");
     struct tm timeinfo_from_rtc = {0};
 
-    if (read_time_from_ds1302_corrected(&timeinfo_from_rtc)) {
+    if (read_time_from_ds1302(&timeinfo_from_rtc)) {
         if (timeinfo_from_rtc.tm_year > 100) { 
             time_t t = mktime(&timeinfo_from_rtc);
             struct timeval now = { .tv_sec = t };
             settimeofday(&now, NULL);
-            ESP_LOGI(TAG, "System time synchronized with corrected RTC time.");
+            ESP_LOGI(TAG, "System time synchronized with RTC.");
+            
+            char buffer[30];
+            strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo_from_rtc);
+            ESP_LOGI(TAG, "Current RTC time: %s", buffer);
         } else {
             ESP_LOGW(TAG, "RTC returned invalid year. System time NOT synchronized.");
         }
@@ -206,12 +278,4 @@ void get_current_date_time_filename(char *date_time_str, size_t len) {
     localtime_r(&now, &timeinfo);
     
     strftime(date_time_str, len, "%Y-%m-%d_%Hh%Mm", &timeinfo);
-}
-
-// Função para ajustar o offset se necessário
-void adjust_rtc_offset(int offset_seconds) {
-    ESP_LOGI(TAG, "Ajustando offset do RTC para %d segundos", offset_seconds);
-    // Esta função pode ser usada para ajustar o RTC_OFFSET_SECONDS em tempo de execução
-    // Por enquanto, apenas loga o valor. Para implementar completamente,
-    // seria necessário tornar RTC_OFFSET_SECONDS uma variável global.
 }
