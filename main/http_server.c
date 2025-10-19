@@ -229,16 +229,17 @@ static esp_err_t favicon_get_handler(httpd_req_t *req) {
 
 
 // Função para iniciar o servidor HTTP
-void start_http_server(void) {
+void start_http_server(httpd_handle_t *server_handle_ptr) {
+    httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 
     // Habilitar correspondência de URI com curingas
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     // Inicia o servidor HTTP
-    httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) == ESP_OK) {
+        *server_handle_ptr = server;
         // Registro do manipulador para favicon.ico
         httpd_uri_t favicon_handler = {
             .uri       = "/favicon.ico",
@@ -278,5 +279,6 @@ void start_http_server(void) {
         ESP_LOGI(TAG, "HTTP server started");
     } else {
         ESP_LOGE(TAG, "Error starting HTTP server");
+        *server_handle_ptr = NULL;
     }
 }

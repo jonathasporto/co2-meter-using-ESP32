@@ -48,8 +48,8 @@ void co2_sensor_power_control(bool enable) {
     if (enable) {
         ESP_LOGI(TAG, "Turning ON CO2 sensor power...");
         gpio_set_level(CO2_POWER_PIN, 1); // Liga o transistor (sensor recebe energia)
-        ESP_LOGI(TAG, "CO2 sensor warming up for %d seconds...", CO2_WARMUP_TIME_S);
-        vTaskDelay(pdMS_TO_TICKS(CO2_WARMUP_TIME_S * 1000)); // Aguarda aquecimento
+        // ESP_LOGI(TAG, "CO2 sensor warming up for %d seconds...", CO2_WARMUP_TIME_S);
+        // vTaskDelay(pdMS_TO_TICKS(CO2_WARMUP_TIME_S * 1000)); // Aguarda aquecimento
         ESP_LOGI(TAG, "CO2 sensor ready for measurements");
     } else {
         ESP_LOGI(TAG, "Turning OFF CO2 sensor power...");
@@ -60,8 +60,7 @@ void co2_sensor_power_control(bool enable) {
 void perform_single_measurement(void) {
     ESP_LOGI(TAG, "Performing scheduled measurement...");
     
-    // NOVO: 1. Liga o sensor de CO2 PRIMEIRO (antes de tudo)
-    co2_sensor_power_control(true);
+
     
     // 2. Configuração dos Pinos e Periféricos (enquanto o sensor aquece)
     uart_config_t uart_config = {
@@ -117,8 +116,7 @@ void perform_single_measurement(void) {
     ESP_LOGI(TAG, "Sample collection finished. Valid samples: %d/%d", amostras_validas, NUM_AMOSTRAS);
     // --- FIM DA COLETA RÁPIDA DE AMOSTRAS ---
 
-    // NOVO: 7. Desliga o sensor de CO2 IMEDIATAMENTE após as medições
-    co2_sensor_power_control(false);
+
 
     // 8. --- CÁLCULO DA MEDIANA ---
     int co2_mediana = -1;
@@ -146,5 +144,5 @@ void perform_single_measurement(void) {
     // Desinstala o driver da UART para economizar energia
     uart_driver_delete(UART_PORT);
     
-    ESP_LOGI(TAG, "Measurement completed. Sensor powered down for energy saving.");
+    ESP_LOGI(TAG, "Measurement completed.");
 }
