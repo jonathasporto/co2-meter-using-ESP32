@@ -98,6 +98,9 @@ static void measurement_scheduler_task(void *arg)
 
     co2_sensor_power_control(true); // Mantém o sensor de CO2 sempre ligado
 
+    // Trava para evitar medições duplicadas (ex: às 07:00:01, 07:00:02...)
+    static bool measurement_taken_for_this_slot = false;
+
     while (1)
     {
         time_t now;
@@ -105,10 +108,13 @@ static void measurement_scheduler_task(void *arg)
         time(&now);
         localtime_r(&now, &timeinfo);
 
+        // Log da hora atual para depuração
+        ESP_LOGI(TAG, "Current RTC time: %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
 #ifdef MODO_DE_TESTE
         bool should_measure = true;
-        long sleep_duration_seconds = 15; // Teste: repete a cada 15s
-        ESP_LOGI(TAG, "TEST MODE: Forcing measurement every 15s.");
+        long sleep_duration_seconds = 60; // Teste: repete a cada 60s
+        ESP_LOGI(TAG, "TEST MODE: Forcing measurement every 60s.");
 #else
         // Determina se é dia ou noite
         bool is_day_time =
@@ -126,29 +132,11 @@ static void measurement_scheduler_task(void *arg)
             (timeinfo.tm_hour == 13 && timeinfo.tm_min == 0) ||
             (timeinfo.tm_hour == 18 && timeinfo.tm_min == 0);
 
-        // Só mede se for horário válido e minuto 00 ou 30
+        // Lógica de agendamento correta
         bool is_on_minute_schedule = (timeinfo.tm_min == 0 || timeinfo.tm_min == 30);
-        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule;
-
-        // Calcula quanto tempo falta até o próximo horário de medição (00 ou 30)
-        int next_minute = (timeinfo.tm_min < 30) ? 30 : 60;
-        struct tm next_time = timeinfo;
-        next_time.tm_min = (next_minute == 60) ? 0 : 30;
-        if (next_minute == 60)
-            next_time.tm_hour++;
-        next_time.tm_sec = 0;
-
-        time_t next_timestamp = mktime(&next_time);
-        long sleep_duration_seconds = (long)difftime(next_timestamp, now);
-
-        if (sleep_duration_seconds < 5)
-            sleep_duration_seconds = 30 * 60; // fallback
-
-        // CURRENT RTC TIME LOGGING
-        ESP_LOGI(TAG, "Current RTC time: %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-
-        ESP_LOGI(TAG, "Next scheduled check at %02d:%02d. Sleeping for %ld seconds.",
-                 next_time.tm_hour, next_time.tm_min, sleep_duration_seconds);
+        
+        // Só mede se todas as condições forem verdadeiras E a trava estiver liberada
+        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule && !measurement_taken_for_this_slot;
 #endif
 
         // Executa medição, se for o caso
@@ -157,29 +145,59 @@ static void measurement_scheduler_task(void *arg)
             ESP_LOGI(TAG, "Scheduled measurement time! Performing data acquisition.");
             perform_single_measurement();
             close_current_file();
+            measurement_taken_for_this_slot = true; // Ativa a trava para não medir de novo neste minuto
         }
         else
         {
             ESP_LOGI(TAG, "Not a scheduled measurement time.");
-            vTaskDelay(pdMS_TO_TICKS(200));
+            // Se NÃO for 00 ou 30, libera a trava para a próxima janela
+            if (timeinfo.tm_min != 0 && timeinfo.tm_min != 30) {
+                measurement_taken_for_this_slot = false;
+            }
         }
 
+        // --- CORREÇÃO: O CÁLCULO DO SONO VEM DEPOIS DA MEDIÇÃO ---
 #ifndef MODO_DE_TESTE
+        // Recalcula a hora ATUAL, *depois* da medição (que demorou)
+        time_t now_after_measure;
+        struct tm timeinfo_after_measure;
+        time(&now_after_measure);
+        localtime_r(&now_after_measure, &timeinfo_after_measure);
+
+        // Calcula quanto tempo falta até o próximo horário de verificação (00 ou 30)
+        int next_minute = (timeinfo_after_measure.tm_min < 30) ? 30 : 60;
+        struct tm next_time = timeinfo_after_measure;
+        next_time.tm_min = (next_minute == 60) ? 0 : 30;
+        if (next_minute == 60)
+            next_time.tm_hour++;
+        next_time.tm_sec = 0;
+
+        time_t next_timestamp = mktime(&next_time);
+        long sleep_duration_seconds = (long)difftime(next_timestamp, now_after_measure);
+
+        if (sleep_duration_seconds < 5) // Se o cálculo falhar ou for muito curto
+            sleep_duration_seconds = 60; // Dorme por 1 minuto como fallback
+
+        ESP_LOGI(TAG, "Next scheduled check at %02d:%02d. Sleeping for %ld seconds.",
+                 next_time.tm_hour, next_time.tm_min, sleep_duration_seconds);
+
         if (is_night_time)
         {
             ESP_LOGI(TAG, "Night time (18:30–06:30). Entering Light-sleep for %ld seconds.", sleep_duration_seconds);
-            vTaskDelay(pdMS_TO_TICKS(200));
+            vTaskDelay(pdMS_TO_TICKS(150));
             esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL);
             esp_light_sleep_start();
         }
-        else
+        else // is_day_time
         {
             ESP_LOGI(TAG, "Day time (06:30–18:30). Waiting %ld seconds (Modem-sleep).", sleep_duration_seconds);
-            vTaskDelay(pdMS_TO_TICKS(200));
+            vTaskDelay(pdMS_TO_TICKS(150));
             vTaskDelay(pdMS_TO_TICKS(sleep_duration_seconds * 1000));
         }
 
 #else
+        ESP_LOGI(TAG, "TEST MODE: Waiting for %ld seconds.", sleep_duration_seconds);
+        vTaskDelay(pdMS_TO_TICKS(150));
         vTaskDelay(pdMS_TO_TICKS(sleep_duration_seconds * 1000));
 #endif
     }

@@ -223,7 +223,8 @@ void initialize_rtc(void) {
     bool rtc_halted = (ds1302_read_reg(0x81) & 0x80) != 0;
     
     // Verificar se é primeira inicialização
-    bool first_boot = is_first_boot();
+     bool first_boot = is_first_boot();
+    // bool first_boot = true;         // descomentar caso queira sempre resetar o RTC
     
     if (rtc_halted || first_boot) {
         if (rtc_halted) {
