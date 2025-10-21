@@ -82,12 +82,12 @@ bool read_time_from_ds1302(struct tm *timeinfo) {
         return false;
     }
 
-    timeinfo->tm_sec  = bcd_to_dec(sec_reg & 0x7F);
-    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F);
+    timeinfo->tm_sec  = bcd_to_dec(sec_reg & 0x7F) + 20; //adiciona 20 segundos para compensar o delay entre a compilacao e o log
+    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F) +1 ; //adiciona 1 minuto para compensar o delay entre a compilacao e o log
     timeinfo->tm_hour = bcd_to_dec(ds1302_read_reg(0x85) & 0x3F);
     timeinfo->tm_mday = bcd_to_dec(ds1302_read_reg(0x87) & 0x3F);
-    timeinfo->tm_mon  = bcd_to_dec(ds1302_read_reg(0x89) & 0x1F) - 1;
-    timeinfo->tm_wday = bcd_to_dec(ds1302_read_reg(0x8B) & 0x07) - 1;
+    timeinfo->tm_mon  = bcd_to_dec(ds1302_read_reg(0x89) & 0x1F) - 1; 
+    timeinfo->tm_wday = bcd_to_dec(ds1302_read_reg(0x8B) & 0x07) - 1; 
     timeinfo->tm_year = bcd_to_dec(ds1302_read_reg(0x8D)) + 100; 
     timeinfo->tm_isdst = -1;
     
@@ -250,7 +250,6 @@ void initialize_rtc(void) {
             struct timeval now = { .tv_sec = t };
             settimeofday(&now, NULL);
             ESP_LOGI(TAG, "System time synchronized with RTC.");
-            
             char buffer[30];
             strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo_from_rtc);
             ESP_LOGI(TAG, "Current RTC time: %s", buffer);
