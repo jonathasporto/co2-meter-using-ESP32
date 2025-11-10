@@ -224,7 +224,7 @@ void initialize_rtc(void) {
     
     // Verificar se é primeira inicialização
      bool first_boot = is_first_boot();
-    // bool first_boot = true;         // descomentar caso queira sempre resetar o RTC
+    //  bool first_boot = true;         // descomentar caso queira resetar o RTC
     
     if (rtc_halted || first_boot) {
         if (rtc_halted) {

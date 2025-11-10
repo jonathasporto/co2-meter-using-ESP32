@@ -98,9 +98,6 @@ static void measurement_scheduler_task(void *arg)
 
     co2_sensor_power_control(true); // Mantém o sensor de CO2 sempre ligado
 
-    // Trava para evitar medições duplicadas (ex: às 07:00:01, 07:00:02...)
-    static bool measurement_taken_for_this_slot = false;
-
     while (1)
     {
         time_t now;
@@ -135,8 +132,8 @@ static void measurement_scheduler_task(void *arg)
         // Lógica de agendamento correta
         bool is_on_minute_schedule = (timeinfo.tm_min == 0 || timeinfo.tm_min == 30);
         
-        // Só mede se todas as condições forem verdadeiras E a trava estiver liberada
-        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule && !measurement_taken_for_this_slot;
+        // Só mede se todas as condições forem verdadeiras
+        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule;
 #endif
 
         // Executa medição, se for o caso
@@ -144,15 +141,13 @@ static void measurement_scheduler_task(void *arg)
         {
             ESP_LOGI(TAG, "Scheduled measurement time! Performing data acquisition.");
             perform_single_measurement();
-            close_current_file();
-            measurement_taken_for_this_slot = true; // Ativa a trava para não medir de novo neste minuto
+            close_current_file();// Ativa a trava para não medir de novo neste minuto
         }
         else
         {
             ESP_LOGI(TAG, "Not a scheduled measurement time.");
             // Se NÃO for 00 ou 30, libera a trava para a próxima janela
             if (timeinfo.tm_min != 0 && timeinfo.tm_min != 30) {
-                measurement_taken_for_this_slot = false;
             }
         }
 
