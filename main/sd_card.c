@@ -33,7 +33,10 @@ bool init_sd_card(void) {
     // Configuração do host SPI
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     //host.slot = SPI2_HOST; // ou SPI3_HOST dependendo do seu hardware
+<<<<<<< HEAD
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+=======
+>>>>>>> 18ec69660fbe7c446d725b940230018a21639db1
 
     // Configuração do barramento SPI
     spi_bus_config_t bus_cfg = {
@@ -90,7 +93,7 @@ static void open_new_csv_file(void) {
 
     // Obtém a data e hora atuais para nomear o arquivo
     char date_time_str[20];
-    get_current_date_time_filename(date_time_str);
+    get_current_date_time_filename(date_time_str, sizeof(date_time_str));
 
     // Salva o tempo de início do arquivo
     file_start_time = time(NULL);
@@ -107,7 +110,11 @@ static void open_new_csv_file(void) {
     } else {
         ESP_LOGI(TAG, "Opened file: %s", file_path);
         // Escreve o cabeçalho do CSV CORRIGIDO para incluir Temp. e Umid.
+<<<<<<< HEAD
         fprintf(csv_file, "Date;Time;CO2_PPM;Temperatura;Umidade\n");
+=======
+        fprintf(csv_file, "Date;Time;CO2_PPM;Temperatura;Umidade;Estrato;Turno_Medicao\n");
+>>>>>>> 18ec69660fbe7c446d725b940230018a21639db1
         fflush(csv_file);
     }
 }
@@ -135,7 +142,11 @@ void close_current_file(void) {
     if (csv_file != NULL) {
         fclose(csv_file);
         csv_file = NULL;
+<<<<<<< HEAD
     }
 
     
+=======
+    }   
+>>>>>>> 18ec69660fbe7c446d725b940230018a21639db1
 }
