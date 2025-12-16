@@ -145,3 +145,4 @@ static void co2_sensor_task(void *arg) {
 
 void start_co2_sensor_task(void) {
     xTaskCreate(co2_sensor_task, "co2_sensor_task", 4096, NULL, 5, NULL);
+}
