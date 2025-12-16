@@ -10,16 +10,17 @@
 #include "rtc.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
-#include "esp_sleep.h"
+// esp_sleep.h não é necessário pois não usaremos modos de suspensão
 
-#define BUTTON_PIN GPIO_NUM_14
-#define DHT_PIN 4 // Pino do DHT22
+#define BUTTON_PIN GPIO_NUM_14 // Mantido apenas para referência, caso precise no futuro
+#define DHT_PIN 4 
 
-// #define MODO_DE_TESTE // Comente esta linha para voltar ao modo normal (horários reais)
+// #define MODO_DE_TESTE // Descomente para testes rápidos (medições a cada 30s)
 
 static const char *TAG = "CO2-METER-INFERIOR";
-static httpd_handle_t server_handle = NULL; // Para controlar o servidor HTTP
+static httpd_handle_t server_handle = NULL;
 
+// --- FUNÇÃO DE INICIALIZAÇÃO DO WIFI ---
 void wifi_init_softap(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
@@ -32,8 +33,8 @@ void wifi_init_softap(void)
 
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid = "ESP32_CO2",
-            .ssid_len = strlen("ESP32_CO2"),
+            .ssid = "ESP32_CO2_INFERIOR",
+            .ssid_len = strlen("ESP32_CO2_INFERIOR"),
             .password = "12345678",
             .max_connection = 4,
             .authmode = WIFI_AUTH_WPA_WPA2_PSK},
@@ -48,55 +49,48 @@ void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "WiFi initialized in AP mode. SSID: %s", wifi_config.ap.ssid);
+    // --- CORREÇÃO CRÍTICA PARA O POWERBANK E ESTABILIDADE ---
+    // Desativa qualquer economia de energia do WiFi.
+    // Isso mantém o rádio ligado 100% do tempo.
+    // Efeito 1: O WiFi para de "sumir".
+    // Efeito 2: O consumo sobe para ~150mA constante, impedindo o Powerbank de desligar.
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+    // 2. Define a potência de transmissão para o MÁXIMO
+    // Unidade: 0.25dBm. 78 * 0.25 = 19.5dBm (Máximo seguro para a maioria dos ESP32)
+    esp_wifi_set_max_tx_power(78);
+
+    ESP_LOGI(TAG, "WiFi initialized. Power Save: OFF, TX Power: MAX (19.5dBm)");
 }
 
-static void button_task(void *arg)
+// --- TAREFA DE REDE (CORE 1) ---
+static void network_task(void *arg)
 {
-    gpio_set_direction(BUTTON_PIN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(BUTTON_PIN, GPIO_PULLUP_ONLY);
-    bool wifi_active = false;
+    ESP_LOGI(TAG, "Starting Network Task on Core %d", xPortGetCoreID());
 
-    while (1)
-    {
-        if (gpio_get_level(BUTTON_PIN) == 1 && !wifi_active)
-        { // Botão pressionado (nível alto com pull-up)
-            wifi_active = true;
-            ESP_LOGI(TAG, "Button pressed! Activating Wi-Fi and HTTP Server for 5 minutes...");
+    // Inicializa o WiFi
+    wifi_init_softap();
 
-            wifi_init_softap();
-            start_http_server(&server_handle);
+    // Inicia o Servidor HTTP
+    start_http_server(&server_handle);
 
-            vTaskDelay(pdMS_TO_TICKS(900000)); // 15 minutos
+    ESP_LOGI(TAG, "HTTP Server started. Keeping task alive.");
 
-            ESP_LOGI(TAG, "15 minutes timeout. Deactivating Wi-Fi...");
-            if (server_handle)
-            {
-                httpd_stop(server_handle);
-                server_handle = NULL;
-            }
-            esp_wifi_stop();
-            esp_wifi_deinit();
-            esp_netif_deinit();
-            wifi_active = false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
+    while (1) {
+        // Delay longo para manter a tarefa viva sem consumir CPU
+        vTaskDelay(pdMS_TO_TICKS(1000)); 
     }
 }
 
+// --- TAREFA DE MEDIÇÃO (CORE 0) ---
 static void measurement_scheduler_task(void *arg)
 {
-    // Inicializações
-    nvs_flash_init();
-    initialize_rtc();
+    ESP_LOGI(TAG, "Starting Scheduler Task on Core %d", xPortGetCoreID());
 
-    if (!init_sd_card())
-    {
-        ESP_LOGE(TAG, "Failed to initialize SD card at startup. Halting scheduler task.");
-        vTaskDelete(NULL); // Encerra a tarefa se o SD card não for inicializado
-    }
+    // NOTA: RTC e SD Card já foram inicializados no app_main para segurança
 
-    co2_sensor_power_control(true); // Mantém o sensor de CO2 sempre ligado
+    // Trava para evitar múltiplas medições no mesmo minuto
+    static bool measurement_taken_for_this_slot = false;
 
     while (1)
     {
@@ -105,22 +99,19 @@ static void measurement_scheduler_task(void *arg)
         time(&now);
         localtime_r(&now, &timeinfo);
 
-        // Log da hora atual para depuração
-        ESP_LOGI(TAG, "Current RTC time: %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+        ESP_LOGI(TAG, "Current Time: %02d:%02d:%02d (Core %d)", 
+                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, xPortGetCoreID());
 
 #ifdef MODO_DE_TESTE
         bool should_measure = true;
-        long sleep_duration_seconds = 1800; // Teste: repete a cada 30 minutos
-        ESP_LOGI(TAG, "TEST MODE: Forcing measurement every 30 minutes.");
+        ESP_LOGI(TAG, "TEST MODE: Forcing measurement.");
 #else
-        // Determina se é dia ou noite
+        // 1. Janela de operação (Dia/Noite)
         bool is_day_time =
             (timeinfo.tm_hour > 6 || (timeinfo.tm_hour == 6 && timeinfo.tm_min >= 30)) &&
             (timeinfo.tm_hour < 22 || (timeinfo.tm_hour == 22 && timeinfo.tm_min < 30));
 
-        bool is_night_time = !is_day_time;
-
-        // Define se está dentro das janelas de medição
+        // 2. Janelas específicas
         bool is_in_measurement_window =
             (timeinfo.tm_hour >= 7 && timeinfo.tm_hour < 9) ||
             (timeinfo.tm_hour >= 11 && timeinfo.tm_hour < 13) ||
@@ -129,78 +120,57 @@ static void measurement_scheduler_task(void *arg)
             (timeinfo.tm_hour == 13 && timeinfo.tm_min == 0) ||
             (timeinfo.tm_hour == 18 && timeinfo.tm_min == 0);
 
-        // Lógica de agendamento correta
+        // 3. Minuto exato
         bool is_on_minute_schedule = (timeinfo.tm_min == 0 || timeinfo.tm_min == 30);
         
-        // Só mede se todas as condições forem verdadeiras
-        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule;
+        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule && !measurement_taken_for_this_slot;
 #endif
 
-        // Executa medição, se for o caso
         if (should_measure)
         {
-            ESP_LOGI(TAG, "Scheduled measurement time! Performing data acquisition.");
+            ESP_LOGI(TAG, "Starting measurement cycle...");
             perform_single_measurement();
-            close_current_file();// Ativa a trava para não medir de novo neste minuto
+            close_current_file();
+            measurement_taken_for_this_slot = true;
         }
         else
         {
-            ESP_LOGI(TAG, "Not a scheduled measurement time.");
-            // Se NÃO for 00 ou 30, libera a trava para a próxima janela
             if (timeinfo.tm_min != 0 && timeinfo.tm_min != 30) {
+                measurement_taken_for_this_slot = false;
             }
         }
 
-        // --- CORREÇÃO: O CÁLCULO DO SONO VEM DEPOIS DA MEDIÇÃO ---
+        // --- CÁLCULO DE ESPERA (DELAY) ---
 #ifndef MODO_DE_TESTE
-        // Recalcula a hora ATUAL, *depois* da medição (que demorou)
-        time_t now_after_measure;
-        struct tm timeinfo_after_measure;
-        time(&now_after_measure);
-        localtime_r(&now_after_measure, &timeinfo_after_measure);
+        time_t now_after;
+        struct tm time_after;
+        time(&now_after);
+        localtime_r(&now_after, &time_after);
 
-        // Calcula quanto tempo falta até o próximo horário de verificação (00 ou 30)
-        int next_minute = (timeinfo_after_measure.tm_min < 30) ? 30 : 60;
-        struct tm next_time = timeinfo_after_measure;
-        next_time.tm_min = (next_minute == 60) ? 0 : 30;
-        if (next_minute == 60)
-            next_time.tm_hour++;
-        next_time.tm_sec = 0;
-
-        time_t next_timestamp = mktime(&next_time);
-        long sleep_duration_seconds = (long)difftime(next_timestamp, now_after_measure);
-
-        if (sleep_duration_seconds < 5) // Se o cálculo falhar ou for muito curto
-            sleep_duration_seconds = 60; // Dorme por 1 minuto como fallback
-
-        ESP_LOGI(TAG, "Next scheduled check at %02d:%02d. Sleeping for %ld seconds.",
-                 next_time.tm_hour, next_time.tm_min, sleep_duration_seconds);
-
-        if (is_night_time)
-        {
-            ESP_LOGI(TAG, "Night time (22:30–06:30). Entering Light-sleep for %ld seconds.", sleep_duration_seconds);
-            vTaskDelay(pdMS_TO_TICKS(150));
-            esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL);
-            esp_light_sleep_start();
-        }
-        else // is_day_time
-        {
-            ESP_LOGI(TAG, "Day time (06:30–22:30). Waiting %ld seconds (Modem-sleep).", sleep_duration_seconds);
-            vTaskDelay(pdMS_TO_TICKS(150));
-            vTaskDelay(pdMS_TO_TICKS(sleep_duration_seconds * 1000));
+        int next_target_min = (time_after.tm_min < 30) ? 30 : 60;
+        struct tm next_time_struct = time_after;
+        next_time_struct.tm_min = (next_target_min == 60) ? 0 : 30;
+        next_time_struct.tm_sec = 0;
+        if (next_target_min == 60) {
+            next_time_struct.tm_hour += 1;
         }
 
+        time_t next_timestamp = mktime(&next_time_struct);
+        long seconds_to_wait = (long)difftime(next_timestamp, now_after);
+
+        if (seconds_to_wait < 5) seconds_to_wait = 60;
+
+        ESP_LOGI(TAG, "Waiting %ld seconds for next slot.", seconds_to_wait);
+        vTaskDelay(pdMS_TO_TICKS(seconds_to_wait * 1000));
 #else
-        ESP_LOGI(TAG, "TEST MODE: Waiting for %ld seconds.", sleep_duration_seconds);
-        vTaskDelay(pdMS_TO_TICKS(150));
-        vTaskDelay(pdMS_TO_TICKS(sleep_duration_seconds * 1000));
+        vTaskDelay(pdMS_TO_TICKS(30000));
 #endif
     }
 }
 
 void app_main(void)
 {
-    // Inicializa o NVS, necessário para o Wi-Fi e outras configurações
+    // 1. Inicializa NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -209,12 +179,27 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // Garante que o Wi-Fi inicie desligado
-    esp_wifi_stop();
-    esp_wifi_deinit();
-    esp_netif_deinit();
+    // 2. INICIALIZAÇÃO DE HARDWARE (CRÍTICO: Fazer antes de criar as tarefas)
+    // Inicializa RTC
+    initialize_rtc();
+    
+    // Inicializa SD Card
+    // Isso garante que o sistema de arquivos esteja montado quando o HTTP Server tentar acessar
+    if (!init_sd_card()) {
+        ESP_LOGE(TAG, "CRITICAL: Failed to initialize SD card in app_main!");
+    } else {
+        ESP_LOGI(TAG, "SD Card initialized successfully in app_main.");
+    }
 
-    // Cria as tarefas FreeRTOS, fixando-as em núcleos específicos para evitar conflitos
-    xTaskCreatePinnedToCore(measurement_scheduler_task, "Scheduler", 8192, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(button_task, "Button/Web", 4096, NULL, 10, NULL, 1);
+    // Liga energia do sensor (ajuda o powerbank)
+    co2_sensor_power_control(true); 
+
+    // 3. Criação das Tarefas
+    // Rede no Core 1 (Alta prioridade para responder HTTP rápido)
+    xTaskCreatePinnedToCore(network_task, "NetworkTask", 8192, NULL, 5, NULL, 1);
+
+    // Medição no Core 0
+    xTaskCreatePinnedToCore(measurement_scheduler_task, "SchedulerTask", 8192, NULL, 5, NULL, 0);
+
+    ESP_LOGI(TAG, "System started. Shared resources initialized.");
 }
