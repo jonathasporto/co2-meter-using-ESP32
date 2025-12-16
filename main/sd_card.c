@@ -106,7 +106,7 @@ static void open_new_csv_file(void) {
     } else {
         ESP_LOGI(TAG, "Opened file: %s", file_path);
         // Escreve o cabeçalho do CSV CORRIGIDO para incluir Temp. e Umid.
-        fprintf(csv_file, "Date;Time;CO2_PPM;Temperatura;Umidade\n");
+        fprintf(csv_file, "Date;Time;CO2_PPM;Temperatura;Umidade;Estrato;Turno_Medicao\n");
         fflush(csv_file);
     }
 }

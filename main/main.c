@@ -17,7 +17,7 @@
 
 // #define MODO_DE_TESTE // Comente esta linha para voltar ao modo normal (horários reais)
 
-static const char *TAG = "CO2-METER-SDCARD";
+static const char *TAG = "CO2-METER-INFERIOR";
 static httpd_handle_t server_handle = NULL; // Para controlar o servidor HTTP
 
 void wifi_init_softap(void)
@@ -67,9 +67,9 @@ static void button_task(void *arg)
             wifi_init_softap();
             start_http_server(&server_handle);
 
-            vTaskDelay(pdMS_TO_TICKS(300000)); // 5 minutos
+            vTaskDelay(pdMS_TO_TICKS(900000)); // 15 minutos
 
-            ESP_LOGI(TAG, "5 minutes timeout. Deactivating Wi-Fi...");
+            ESP_LOGI(TAG, "15 minutes timeout. Deactivating Wi-Fi...");
             if (server_handle)
             {
                 httpd_stop(server_handle);
@@ -110,13 +110,13 @@ static void measurement_scheduler_task(void *arg)
 
 #ifdef MODO_DE_TESTE
         bool should_measure = true;
-        long sleep_duration_seconds = 60; // Teste: repete a cada 60s
-        ESP_LOGI(TAG, "TEST MODE: Forcing measurement every 60s.");
+        long sleep_duration_seconds = 1800; // Teste: repete a cada 30 minutos
+        ESP_LOGI(TAG, "TEST MODE: Forcing measurement every 30 minutes.");
 #else
         // Determina se é dia ou noite
         bool is_day_time =
             (timeinfo.tm_hour > 6 || (timeinfo.tm_hour == 6 && timeinfo.tm_min >= 30)) &&
-            (timeinfo.tm_hour < 18 || (timeinfo.tm_hour == 18 && timeinfo.tm_min < 30));
+            (timeinfo.tm_hour < 22 || (timeinfo.tm_hour == 22 && timeinfo.tm_min < 30));
 
         bool is_night_time = !is_day_time;
 
@@ -178,14 +178,14 @@ static void measurement_scheduler_task(void *arg)
 
         if (is_night_time)
         {
-            ESP_LOGI(TAG, "Night time (18:30–06:30). Entering Light-sleep for %ld seconds.", sleep_duration_seconds);
+            ESP_LOGI(TAG, "Night time (22:30–06:30). Entering Light-sleep for %ld seconds.", sleep_duration_seconds);
             vTaskDelay(pdMS_TO_TICKS(150));
             esp_sleep_enable_timer_wakeup(sleep_duration_seconds * 1000000ULL);
             esp_light_sleep_start();
         }
         else // is_day_time
         {
-            ESP_LOGI(TAG, "Day time (06:30–18:30). Waiting %ld seconds (Modem-sleep).", sleep_duration_seconds);
+            ESP_LOGI(TAG, "Day time (06:30–22:30). Waiting %ld seconds (Modem-sleep).", sleep_duration_seconds);
             vTaskDelay(pdMS_TO_TICKS(150));
             vTaskDelay(pdMS_TO_TICKS(sleep_duration_seconds * 1000));
         }

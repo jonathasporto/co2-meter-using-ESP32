@@ -82,8 +82,8 @@ bool read_time_from_ds1302(struct tm *timeinfo) {
         return false;
     }
 
-    timeinfo->tm_sec  = bcd_to_dec(sec_reg & 0x7F) + 20; //adiciona 20 segundos para compensar o delay entre a compilacao e o log
-    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F) +1 ; //adiciona 1 minuto para compensar o delay entre a compilacao e o log
+    timeinfo->tm_sec  = bcd_to_dec(sec_reg & 0x7F); //adiciona 20 segundos para compensar o delay entre a compilacao e o log
+    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F) + 2 ; //remoção de 3 minutos de correção
     timeinfo->tm_hour = bcd_to_dec(ds1302_read_reg(0x85) & 0x3F);
     timeinfo->tm_mday = bcd_to_dec(ds1302_read_reg(0x87) & 0x3F);
     timeinfo->tm_mon  = bcd_to_dec(ds1302_read_reg(0x89) & 0x1F) - 1; 
@@ -224,7 +224,7 @@ void initialize_rtc(void) {
     
     // Verificar se é primeira inicialização
      bool first_boot = is_first_boot();
-    //  bool first_boot = true;         // descomentar caso queira resetar o RTC
+    //bool first_boot = true;         // descomentar caso queira resetar o RTC
     
     if (rtc_halted || first_boot) {
         if (rtc_halted) {

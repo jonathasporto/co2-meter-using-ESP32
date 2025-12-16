@@ -10,7 +10,9 @@
 #include <stdlib.h>
 #include "esp_sleep.h"
 
-#define FAN_PURGE_DURATION_S 20        // Duração que o fan fica ligado para limpeza, em segundos. 
+#define ESTRATO "Inferior"        // Defina o estrato como "Inferior", "Médio" ou "Superior"
+
+// #define FAN_PURGE_DURATION_S 0        // Duração que o fan fica ligado para limpeza, em segundos. 
 #define NUM_AMOSTRAS 31                // Número de amostras a serem coletadas para a mediana. Use um número ímpar. (alterar para 61 pelo menos na prática)
 #define INTERVALO_AMOSTRAS_MS 2000     // Intervalo entre cada amostra rápida em milissegundos.
 
@@ -25,7 +27,7 @@
 #define FAN_PIN 13 
 #define UART_BUF_SIZE 1024
 
-static const char *TAG = "CO2_SENSOR_TASK";
+static const char *TAG = "CO2_SENSOR_ESTRATO_INFERIOR";
 
 // Função auxiliar para ordenar o array de amostras para o cálculo da mediana.
 int comparar_inteiros(const void * a, const void * b) {
@@ -40,7 +42,7 @@ void co2_sensor_power_control(bool enable) {
     if (!power_pin_initialized) {
         gpio_reset_pin(CO2_POWER_PIN);
         gpio_set_direction(CO2_POWER_PIN, GPIO_MODE_OUTPUT);
-        gpio_set_level(CO2_POWER_PIN, 0); // Começa desligado
+        gpio_set_level(CO2_POWER_PIN, 1); // Começa ligado
         power_pin_initialized = true;
         ESP_LOGI(TAG, "CO2 sensor power control pin (GPIO%d) initialized", CO2_POWER_PIN);
     }
@@ -78,15 +80,15 @@ void perform_single_measurement(void) {
     gpio_set_direction(FAN_PIN, GPIO_MODE_OUTPUT);
     gpio_set_level(FAN_PIN, 0); // Garante que comece desligado
     
-    // 3. Liga o Fan para renovar o ar (sensor já está aquecendo)
-    ESP_LOGI(TAG, "Activating fan for %d seconds to purge air...", FAN_PURGE_DURATION_S);
-    gpio_set_level(FAN_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(FAN_PURGE_DURATION_S * 1000));
+    // // 3. Liga o Fan para renovar o ar (sensor já está aquecendo)
+    // ESP_LOGI(TAG, "Activating fan for %d seconds to purge air...", FAN_PURGE_DURATION_S);
+    // gpio_set_level(FAN_PIN, 1);
+    // vTaskDelay(pdMS_TO_TICKS(FAN_PURGE_DURATION_S * 1000));
 
-    // 4. Desliga o fan ANTES de iniciar as medições
-    gpio_set_level(FAN_PIN, 0);
-    ESP_LOGI(TAG, "Fan deactivated. Starting measurements in static air.");
-    vTaskDelay(pdMS_TO_TICKS(1000)); // Pequena pausa para o ar assentar
+    // // 4. Desliga o fan ANTES de iniciar as medições
+    // gpio_set_level(FAN_PIN, 0);
+    // ESP_LOGI(TAG, "Fan deactivated. Starting measurements in static air.");
+    // vTaskDelay(pdMS_TO_TICKS(1000)); // Pequena pausa para o ar assentar
 
     // 5. Leitura do DHT (já com o ar renovado e parado)
     float temperature = 0.0, humidity = 0.0;
@@ -116,7 +118,20 @@ void perform_single_measurement(void) {
     ESP_LOGI(TAG, "Sample collection finished. Valid samples: %d/%d", amostras_validas, NUM_AMOSTRAS);
     // --- FIM DA COLETA RÁPIDA DE AMOSTRAS ---
 
-
+    // 7. Definir turno de medição (se for de 7 as 9 = manha, 11 as 13 = zênite, 16 as 18 = entardecer)
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    const char *turno_medicao = "Desconhecido";
+    if (timeinfo.tm_hour >= 7 && timeinfo.tm_hour <= 9) {
+        turno_medicao = "Manha";
+    } else if (timeinfo.tm_hour >= 11 && timeinfo.tm_hour <= 13) {
+        turno_medicao = "Zenite";
+    } else if (timeinfo.tm_hour >= 16 && timeinfo.tm_hour <= 18) {
+        turno_medicao = "Entardecer";
+    }
+    
 
     // 8. --- CÁLCULO DA MEDIANA ---
     int co2_mediana = -1;
@@ -128,16 +143,17 @@ void perform_single_measurement(void) {
     }
     // --- FIM DO CÁLCULO DA MEDIANA ---
     
-    // 9. Processa e salva o valor final (a mediana)
+    // 10. Processa e salva o valor final (a mediana)
     char date_str[11], time_str[9];
+    const char *estrato = ESTRATO;
     get_current_date_time(date_str, sizeof(date_str), time_str, sizeof(time_str));
 
-    ESP_LOGI(TAG, "FINAL VALUE: %s %s | CO2 (Median): %d ppm | Temp: %.1fC | Hum: %.1f%%", 
-                date_str, time_str, co2_mediana, temperature, humidity);
+    ESP_LOGI(TAG, "FINAL VALUE: %s %s | CO2 (Median): %d ppm | Temp: %.1fC | Hum: %.1f%% | Estrato: %s | Turno_Medicao: %s", 
+                date_str, time_str, co2_mediana, temperature, humidity, estrato, turno_medicao);
 
     char csv_line[128];
-    snprintf(csv_line, sizeof(csv_line), "%s;%s;%d;%.1f;%.1f\n", 
-                date_str, time_str, co2_mediana, temperature, humidity);
+    snprintf(csv_line, sizeof(csv_line), "%s;%s;%d;%.1f;%.1f;%s;%s\n", 
+                date_str, time_str, co2_mediana, temperature, humidity, estrato, turno_medicao);
     
     write_data_to_csv(csv_line);
 
