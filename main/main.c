@@ -12,7 +12,7 @@
 #include "nvs_flash.h"
 // esp_sleep.h não é necessário pois não usaremos modos de suspensão
 
-#define BUTTON_PIN GPIO_NUM_14 // Mantido apenas para referência, caso precise no futuro
+//  #define BUTTON_PIN GPIO_NUM_14
 #define DHT_PIN 4 
 
 // #define MODO_DE_TESTE // Descomente para testes rápidos (medições a cada 30s)
@@ -49,18 +49,14 @@ void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // --- CORREÇÃO CRÍTICA PARA O POWERBANK E ESTABILIDADE ---
-    // Desativa qualquer economia de energia do WiFi.
-    // Isso mantém o rádio ligado 100% do tempo.
-    // Efeito 1: O WiFi para de "sumir".
-    // Efeito 2: O consumo sobe para ~150mA constante, impedindo o Powerbank de desligar.
-    esp_wifi_set_ps(WIFI_PS_NONE);
+    //sleep 3 segundos para garantir estabilidade
+    vTaskDelay(pdMS_TO_TICKS(3000));
 
-    // 2. Define a potência de transmissão para o MÁXIMO
-    // Unidade: 0.25dBm. 78 * 0.25 = 19.5dBm (Máximo seguro para a maioria dos ESP32)
-    esp_wifi_set_max_tx_power(78);
+    // Configurações para estabilidade e para MANTER O POWERBANK LIGADO
+    esp_wifi_set_ps(WIFI_PS_NONE); // Desativa economia de energia
+    esp_wifi_set_max_tx_power(78); // Potência máxima (19.5dBm)
 
-    ESP_LOGI(TAG, "WiFi initialized. Power Save: OFF, TX Power: MAX (19.5dBm)");
+    ESP_LOGI(TAG, "WiFi initialized. Power Save: OFF, TX Power: MAX.");
 }
 
 // --- TAREFA DE REDE (CORE 1) ---
@@ -68,17 +64,13 @@ static void network_task(void *arg)
 {
     ESP_LOGI(TAG, "Starting Network Task on Core %d", xPortGetCoreID());
 
-    // Inicializa o WiFi
     wifi_init_softap();
-
-    // Inicia o Servidor HTTP
     start_http_server(&server_handle);
 
-    ESP_LOGI(TAG, "HTTP Server started. Keeping task alive.");
+    ESP_LOGI(TAG, "HTTP Server started.");
 
     while (1) {
-        // Delay longo para manter a tarefa viva sem consumir CPU
-        vTaskDelay(pdMS_TO_TICKS(1000)); 
+        vTaskDelay(pdMS_TO_TICKS(100000)); 
     }
 }
 
@@ -87,10 +79,10 @@ static void measurement_scheduler_task(void *arg)
 {
     ESP_LOGI(TAG, "Starting Scheduler Task on Core %d", xPortGetCoreID());
 
-    // NOTA: RTC e SD Card já foram inicializados no app_main para segurança
-
-    // Trava para evitar múltiplas medições no mesmo minuto
-    static bool measurement_taken_for_this_slot = false;
+    // Variáveis para rastrear a ÚLTIMA vez que mediu
+    // Inicializam com -1 para garantir que a primeira medição sempre ocorra
+    static int last_meas_hour = -1;
+    static int last_meas_min = -1;
 
     while (1)
     {
@@ -123,7 +115,11 @@ static void measurement_scheduler_task(void *arg)
         // 3. Minuto exato
         bool is_on_minute_schedule = (timeinfo.tm_min == 0 || timeinfo.tm_min == 30);
         
-        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule && !measurement_taken_for_this_slot;
+        // 4. CORREÇÃO: Verifica se o horário atual é DIFERENTE do último medido
+        bool is_new_time_slot = (timeinfo.tm_hour != last_meas_hour) || (timeinfo.tm_min != last_meas_min);
+
+        // Só mede se todas as condições forem verdadeiras
+        bool should_measure = is_day_time && is_in_measurement_window && is_on_minute_schedule && is_new_time_slot;
 #endif
 
         if (should_measure)
@@ -131,17 +127,17 @@ static void measurement_scheduler_task(void *arg)
             ESP_LOGI(TAG, "Starting measurement cycle...");
             perform_single_measurement();
             close_current_file();
-            measurement_taken_for_this_slot = true;
+            
+            // ATUALIZA O REGISTRO DA ÚLTIMA MEDIÇÃO
+            last_meas_hour = timeinfo.tm_hour;
+            last_meas_min = timeinfo.tm_min;
+            
+            ESP_LOGI(TAG, "Measurement recorded for slot %02d:%02d", last_meas_hour, last_meas_min);
         }
-        else
-        {
-            if (timeinfo.tm_min != 0 && timeinfo.tm_min != 30) {
-                measurement_taken_for_this_slot = false;
-            }
-        }
-
+        
         // --- CÁLCULO DE ESPERA (DELAY) ---
 #ifndef MODO_DE_TESTE
+        // Atualiza a hora POIS a medição demorou
         time_t now_after;
         struct tm time_after;
         time(&now_after);
@@ -158,6 +154,7 @@ static void measurement_scheduler_task(void *arg)
         time_t next_timestamp = mktime(&next_time_struct);
         long seconds_to_wait = (long)difftime(next_timestamp, now_after);
 
+        // Proteção para não esperar tempo negativo ou muito curto
         if (seconds_to_wait < 5) seconds_to_wait = 60;
 
         ESP_LOGI(TAG, "Waiting %ld seconds for next slot.", seconds_to_wait);
@@ -179,27 +176,21 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // 2. INICIALIZAÇÃO DE HARDWARE (CRÍTICO: Fazer antes de criar as tarefas)
-    // Inicializa RTC
+    // 2. INICIALIZAÇÃO DE HARDWARE
     initialize_rtc();
     
-    // Inicializa SD Card
-    // Isso garante que o sistema de arquivos esteja montado quando o HTTP Server tentar acessar
     if (!init_sd_card()) {
         ESP_LOGE(TAG, "CRITICAL: Failed to initialize SD card in app_main!");
     } else {
-        ESP_LOGI(TAG, "SD Card initialized successfully in app_main.");
+        ESP_LOGI(TAG, "SD Card initialized successfully.");
     }
 
     // Liga energia do sensor (ajuda o powerbank)
     co2_sensor_power_control(true); 
 
     // 3. Criação das Tarefas
-    // Rede no Core 1 (Alta prioridade para responder HTTP rápido)
     xTaskCreatePinnedToCore(network_task, "NetworkTask", 8192, NULL, 5, NULL, 1);
-
-    // Medição no Core 0
     xTaskCreatePinnedToCore(measurement_scheduler_task, "SchedulerTask", 8192, NULL, 5, NULL, 0);
 
-    ESP_LOGI(TAG, "System started. Shared resources initialized.");
+    ESP_LOGI(TAG, "System started. Power Save OFF.");
 }

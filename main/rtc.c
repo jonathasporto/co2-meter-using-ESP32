@@ -224,7 +224,7 @@ void initialize_rtc(void) {
     
     // Verificar se é primeira inicialização
      bool first_boot = is_first_boot();
-    //bool first_boot = true;         // descomentar caso queira resetar o RTC
+    // bool first_boot = true;         // descomentar caso queira resetar o RTC
     
     if (rtc_halted || first_boot) {
         if (rtc_halted) {
@@ -259,6 +259,7 @@ void initialize_rtc(void) {
     } else {
         ESP_LOGE(TAG, "Failed to read valid time from RTC. System time NOT synchronized.");
     }
+    // set_manual_time_rtc(2025, 12, 17, 6, 55, 0); // Definir hora manualmente para teste
 }
 
 void get_current_date_time(char *date_str, size_t date_len, char *time_str, size_t time_len) {
