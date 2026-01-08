@@ -27,7 +27,7 @@
 #define FAN_PIN 13 
 #define UART_BUF_SIZE 1024
 
-static const char *TAG = "CO2_SENSOR_ESTRATO_INFERIOR";
+static const char *TAG = "CO2_SENSOR_TASK";
 
 // Função auxiliar para ordenar o array de amostras para o cálculo da mediana.
 int comparar_inteiros(const void * a, const void * b) {
@@ -155,10 +155,56 @@ void perform_single_measurement(void) {
     snprintf(csv_line, sizeof(csv_line), "%s;%s;%d;%.1f;%.1f;%s;%s\n", 
                 date_str, time_str, co2_mediana, temperature, humidity, estrato, turno_medicao);
     
-    write_data_to_csv(csv_line);
+    write_data_to_csv(csv_line, estrato);
 
     // Desinstala o driver da UART para economizar energia
     uart_driver_delete(UART_PORT);
     
     ESP_LOGI(TAG, "Measurement completed.");
+}
+
+bool get_quick_sensor_data(int *co2, float *temp, float *hum) {
+    ESP_LOGI(TAG, "Performing QUICK sensor reading for Web...");
+
+    // 1. Configura UART (Necessário pois é desligada após medição principal)
+    uart_config_t uart_config = {
+        .baud_rate = 9600,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+    uart_param_config(UART_PORT, &uart_config);
+    uart_set_pin(UART_PORT, TX_PIN, RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_driver_install(UART_PORT, 1024, 0, 0, NULL, 0);
+
+    // 2. Leitura DHT (Rápida)
+    // Tenta ler. Se falhar, zera os valores.
+    if (dht_read_float_data(DHT_TYPE_AM2301, DHT_PIN, hum, temp) != ESP_OK) {
+        ESP_LOGW(TAG, "DHT Quick Read failed");
+        *temp = 0.0;
+        *hum = 0.0;
+    }
+
+    // 3. Leitura CO2 (1 amostra apenas)
+    uint8_t read_cmd[9] = { 0xFF, 0x01, 0x86, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79 };
+    uart_write_bytes(UART_PORT, (const char *)read_cmd, sizeof(read_cmd));
+    
+    uint8_t data[9];
+    // Timeout curto (2s)
+    int len = uart_read_bytes(UART_PORT, data, sizeof(data), pdMS_TO_TICKS(2000));
+    
+    bool success = false;
+    if (len == 9) {
+        *co2 = (data[2] << 8) | data[3];
+        success = true;
+    } else {
+        ESP_LOGW(TAG, "CO2 Quick Read failed or timed out");
+        *co2 = -1;
+    }
+
+    // 4. Limpeza
+    uart_driver_delete(UART_PORT); // Libera recursos
+    
+    return success;
 }

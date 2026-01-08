@@ -83,7 +83,7 @@ bool read_time_from_ds1302(struct tm *timeinfo) {
     }
 
     timeinfo->tm_sec  = bcd_to_dec(sec_reg & 0x7F); //adiciona 20 segundos para compensar o delay entre a compilacao e o log
-    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F) + 2 ; //remoção de 3 minutos de correção
+    timeinfo->tm_min  = bcd_to_dec(ds1302_read_reg(0x83) & 0x7F) - 3 ; //remoção de 3 minutos de correção
     timeinfo->tm_hour = bcd_to_dec(ds1302_read_reg(0x85) & 0x3F);
     timeinfo->tm_mday = bcd_to_dec(ds1302_read_reg(0x87) & 0x3F);
     timeinfo->tm_mon  = bcd_to_dec(ds1302_read_reg(0x89) & 0x1F) - 1; 

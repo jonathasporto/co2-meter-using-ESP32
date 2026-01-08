@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h> // Necessário para função stat()
 #include "sd_card.h"
 #include "esp_log.h"
 #include "driver/sdspi_host.h"
@@ -82,52 +83,44 @@ bool init_sd_card(void) {
     return true;
 }
 
-static void open_new_csv_file(void) {
-    if (csv_file != NULL) {
-        fclose(csv_file);
-    }
-
-    // Obtém a data e hora atuais para nomear o arquivo
-    char date_time_str[20];
-    get_current_date_time_filename(date_time_str, sizeof(date_time_str));
-
-    // Salva o tempo de início do arquivo
-    file_start_time = time(NULL);
-
-    // Cria o caminho completo do arquivo
-    char file_path[FILE_PATH_MAX];
-    snprintf(file_path, sizeof(file_path), MOUNT_POINT"/%s.csv", date_time_str);
-
-    // Abre o arquivo para escrita
-    ESP_LOGI(TAG, "Opening file %s", file_path);
-    csv_file = fopen(file_path, "w");
-    if (csv_file == NULL) {
-        ESP_LOGE(TAG, "Failed to open file for writing: errno %d", errno);
-    } else {
-        ESP_LOGI(TAG, "Opened file: %s", file_path);
-        // Escreve o cabeçalho do CSV CORRIGIDO para incluir Temp. e Umid.
-        fprintf(csv_file, "Date;Time;CO2_PPM;Temperatura;Umidade;Estrato;Turno_Medicao\n");
-        fflush(csv_file);
-    }
+void get_daily_filename(char *filename, size_t len, const char *estrato) {
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    // Formato: /sdcard/2026-01-08-estrato.csv
+    snprintf(filename, len, MOUNT_POINT"/%04d-%02d-%02d-%s.csv", 
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday, estrato);
 }
 
-void write_data_to_csv(const char *data) {
-    if (csv_file == NULL) {
-        open_new_csv_file();
+void write_data_to_csv(const char *data, const char *estrato) {
+    char filepath[128];
+    get_daily_filename(filepath, sizeof(filepath), estrato);
+
+    // Verifica se o arquivo existe para decidir se escreve o cabeçalho
+    struct stat st;
+    bool file_exists = (stat(filepath, &st) == 0);
+
+    ESP_LOGI(TAG, "Appending data to file: %s", filepath);
+    
+    // Abre em modo "a" (append) - adiciona ao final
+    FILE *f = fopen(filepath, "a");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for appending");
+        return;
     }
 
-    // Verifica se já passou uma hora para criar um novo arquivo
-    time_t current_time = time(NULL);
-//    if (difftime(current_time, file_start_time) >= 3600) {
-    if (difftime(current_time, file_start_time) >= 60) {  // alterado provisoriamente para 1 min
-        open_new_csv_file();
+    // Se é um arquivo novo (primeira medição do dia), cria o cabeçalho
+    if (!file_exists) {
+        fprintf(f, "Date;Time;CO2_PPM;Temperatura;Umidade;Estrato;Turno_Medicao\n");
     }
 
-    if (csv_file != NULL) {
-        fprintf(csv_file, "%s", data);
-        fflush(csv_file);
-        ESP_LOGI(TAG, "Data successfully written to SD card.");
-    }
+    // Escreve os dados
+    fprintf(f, "%s", data);
+    
+    // Fecha imediatamente para garantir a gravação no cartão
+    fclose(f);
+    ESP_LOGI(TAG, "Data saved successfully.");
 }
 
 void close_current_file(void) {

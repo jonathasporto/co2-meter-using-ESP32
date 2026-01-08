@@ -1,5 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h" // NECESSÁRIO PARA O MUTEX
 #include <string.h>
 #include "esp_system.h"
 #include "esp_log.h"
@@ -17,8 +18,12 @@
 
 // #define MODO_DE_TESTE // Descomente para testes rápidos (medições a cada 30s)
 
-static const char *TAG = "CO2-METER-INFERIOR";
+static const char *TAG = "MAIN_APP";
 static httpd_handle_t server_handle = NULL;
+
+// --- SEMÁFORO GLOBAL (MUTEX) ---
+// Usado para garantir que apenas uma tarefa acesse o sensor por vez.
+SemaphoreHandle_t xSensorMutex = NULL;
 
 // --- FUNÇÃO DE INICIALIZAÇÃO DO WIFI ---
 void wifi_init_softap(void)
@@ -125,14 +130,26 @@ static void measurement_scheduler_task(void *arg)
         if (should_measure)
         {
             ESP_LOGI(TAG, "Starting measurement cycle...");
-            perform_single_measurement();
-            close_current_file();
-            
+            // --- PROTEÇÃO COM MUTEX (PRIORIDADE ALTA) ---
+            // portMAX_DELAY faz o sistema ESPERAR infinitamente até o webserver soltar o sensor.
+            // Como o webserver é rápido (2s), isso não atrasa a medição.
+            // Uma vez pego, o Agendador segura o sensor por 3 minutos.
+            if (xSemaphoreTake(xSensorMutex, portMAX_DELAY) == pdTRUE) {
+                
+                perform_single_measurement();
+                // O arquivo já é fechado dentro da função de escrita no sd_card.c novo
+                
+                xSemaphoreGive(xSensorMutex); // Libera para o Webserver usar se quiser
+
             // ATUALIZA O REGISTRO DA ÚLTIMA MEDIÇÃO
             last_meas_hour = timeinfo.tm_hour;
             last_meas_min = timeinfo.tm_min;
             
             ESP_LOGI(TAG, "Measurement recorded for slot %02d:%02d", last_meas_hour, last_meas_min);
+
+            } else {
+                ESP_LOGE(TAG, "Error: Could not take Mutex for measurement!");
+            }
         }
         
         // --- CÁLCULO DE ESPERA (DELAY) ---
@@ -175,6 +192,12 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // CRIAR O MUTEX
+    xSensorMutex = xSemaphoreCreateMutex();
+    if (xSensorMutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create Mutex!");
+    }
 
     // 2. INICIALIZAÇÃO DE HARDWARE
     initialize_rtc();
