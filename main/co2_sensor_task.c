@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include "esp_sleep.h"
 
-#define ESTRATO "Inferior"        // Defina o estrato como "Inferior", "Médio" ou "Superior"
+#define ESTRATO "Medio"        // Defina o estrato como "Superior", "Médio" ou "Superior"
 
 // #define FAN_PURGE_DURATION_S 0        // Duração que o fan fica ligado para limpeza, em segundos. 
 #define NUM_AMOSTRAS 31                // Número de amostras a serem coletadas para a mediana. Use um número ímpar. (alterar para 61 pelo menos na prática)

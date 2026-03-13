@@ -38,8 +38,8 @@ void wifi_init_softap(void)
 
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid = "ESP32_CO2_INFERIOR",
-            .ssid_len = strlen("ESP32_CO2_INFERIOR"),
+            .ssid = "ESP32_CO2_MEDIO",
+            .ssid_len = strlen("ESP32_CO2_MEDIO"),
             .password = "12345678",
             .max_connection = 4,
             .authmode = WIFI_AUTH_WPA_WPA2_PSK},
@@ -50,12 +50,15 @@ void wifi_init_softap(void)
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
 
+    //sleep 2 segundos para garantir estabilidade
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    //sleep 3 segundos para garantir estabilidade
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    //sleep 1 segundo para garantir estabilidade
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     // Configurações para estabilidade e para MANTER O POWERBANK LIGADO
     esp_wifi_set_ps(WIFI_PS_NONE); // Desativa economia de energia

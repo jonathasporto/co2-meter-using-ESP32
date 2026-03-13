@@ -173,7 +173,7 @@ static const char *HTML_HEADER = "<!DOCTYPE html>"
 "  });"
 "}"
 "</script>"
-"</head><body><header><h1>Monitor CO₂ Inferior</h1></header><main>";
+"</head><body><header><h1>Monitor CO₂ Medio</h1></header><main>";
 
 static const char *HTML_FOOTER = "</main></body></html>";
 
