@@ -1,10 +1,4 @@
-Aqui está uma documentação completa e profissional para o seu `README.md`. Ela foi estruturada com base no código-fonte fornecido, nas soluções de engenharia aplicadas (como o uso do *Mutex* e a estratégia energética) e no contexto da pesquisa florestal.
-
-Copie o conteúdo abaixo e cole no arquivo `README.md` do seu repositório no GitHub:
-
----
-
-# 🌲 Monitoramento Microclimático e de $CO_2$ com ESP32 (LCN / CIPEC)
+# 🌲 Monitoramento Microclimático e de $CO_2$ com ESP32
 
 Este repositório contém o código-fonte (*firmware*) de um sistema embarcado autônomo desenvolvido para o **Laboratório de Computação Natural (LCN)** e o **Centro de Inovação e Pesquisa e Extensão em Computação (CIPEC)** da Universidade Estadual do Sudoeste da Bahia (UESB).
 
