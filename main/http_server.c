@@ -6,8 +6,8 @@
 #include "esp_vfs.h"
 #include "sd_card.h"
 #include "rtc.h"
-#include "freertos/semphr.h"   // Necessário
-#include "co2_sensor_task.h"   // Para get_quick_sensor_data
+#include "freertos/semphr.h" 
+#include "co2_sensor_task.h"  
 
 static const char *TAG = "HTTP_SERVER";
 extern SemaphoreHandle_t xSensorMutex; // Pega o Mutex criado no main.c
