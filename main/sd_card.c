@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <sys/stat.h> // Necessário para função stat()
+#include <sys/stat.h>
 #include "sd_card.h"
 #include "esp_log.h"
 #include "driver/sdspi_host.h"

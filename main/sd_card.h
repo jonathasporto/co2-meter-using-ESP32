@@ -2,7 +2,7 @@
 #define SD_CARD_H
 
 #include <stdbool.h>
-#include "esp_err.h"  // *** ADICIONAR ESTA LINHA ***
+#include "esp_err.h" 
 
 bool init_sd_card(void);
 void write_data_to_csv(const char *data, const char *estrato); 
