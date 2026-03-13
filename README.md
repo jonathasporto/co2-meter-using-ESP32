@@ -103,7 +103,7 @@ Para extrair os dados na floresta sem necessidade de internet:
 
 ## 👨‍💻 Autores e Agradecimentos
 
-* **Desenvolvedor Principal:** Jonathas Porto - *Engenharia de Software & Hardware (BCC / UESB)*
+* **Desenvolvedor Principal:** Jonathas Porto - *Ciência da computação (UESB)*
 * **Orientação Técnica:** Prof. Hélio Lopes dos Santos
 * **Pesquisador (Eng. Florestal):** Leandro
 
